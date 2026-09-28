@@ -1,0 +1,46 @@
+{
+  "_comment": [
+    "Ground truth captured from a real pull request against the ReviewTest",
+    "sandbox repo on 2026-09-27. The `patch` field is GitHub's own output, not",
+    "hand-written, so this fixture is a real regression test of the parser",
+    "against the exact format the API returns.",
+    "",
+    "Expected anchor: the off-by-one is in an ADDED line, so the finding anchors",
+    "on the RIGHT side of the diff."
+  ],
+  "source": "Laughing-Man-Studios/ReviewTest#1",
+  "prNumber": 1,
+  "headSha": "dea710bb59e825efafe655db4e76ba45f1f8e812",
+  "files": [
+    {
+      "filename": "src/orders.ts",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 20,
+      "changes": 22
+    }
+  ],
+  "expectedParse": {
+    "fileCount": 1,
+    "hunkCount": 1,
+    "header": "@@ -1,25 +1,7 @@",
+    "oldStart": 1,
+    "oldLines": 25,
+    "newStart": 1,
+    "newLines": 7,
+    "addedLines": [
+      "  for (let i = 0; i < items.length - 1; i++) {",
+      "    total += items[i].quantity * items[i].unitPriceCents;"
+    ],
+    "removedLineCount": 20,
+    "contextLineCount": 5
+  },
+  "expectedAnchor": {
+    "_comment": "The model should quote the added loop header; it is RIGHT line 3.",
+    "quote": "  for (let i = 0; i < items.length - 1; i++) {",
+    "side": "RIGHT",
+    "line": 3,
+    "startLine": 3,
+    "severity": "warning"
+  }
+}

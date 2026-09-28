@@ -11,7 +11,7 @@
 
 | # | Decision | Resolution |
 |---|---|---|
-| 1 | Packaging | Distributable action at repo root; `uses: Rogibb111/FreeReview@v1` |
+| 1 | Packaging | Distributable action at repo root; `uses: Laughing-Man-Studios/FreeReview@v1` |
 | 2 | Tests | vitest + msw; fast-check for property-based invariants |
 | 3 | Live evaluation | OpenRouter key available; Phase 7 runs live, quota-capped |
 | 4 | Golden dataset | **Staged: 14 (Stage A) → 32 (Stage B)**, held-out committed at Stage A, plus a `production/` tier and `npm run validate:fixtures` |
@@ -799,7 +799,7 @@ All of `docs/plan.md` §38, plus:
 
 **1. Sandbox repository — user creates it.** The current fine-grained PAT returns 403 on `POST /user/repos`; it cannot create repositories.
 
-- Create a **private** repo, e.g. `Rogibb111/freereview-sandbox`. Private is mandatory — the action is private-repo-only by design.
+- Create a **private** repo. `Laughing-Man-Studios/ReviewTest` was created for this. Private is mandatory — the action is private-repo-only by design.
 - Add an initial commit on `main` so PRs have a base.
 - Add the `OPENROUTER_API_KEY` repository secret.
 - Settings → Actions → General: keep "Read and write permissions" as-is; the workflow declares `permissions:` explicitly, which overrides the repo default.

@@ -1,0 +1,10 @@
+# Default owner for everything in this repository.
+* @Rogibb111
+
+# Security-sensitive paths. A second reviewer is strongly preferred here,
+# because a change to the bundle security assertions can silently remove the
+# guarantees the project advertises.
+/src/llm/          @Rogibb111
+/src/anchor/       @Rogibb111
+/src/github/       @Rogibb111
+/tests/security/   @Rogibb111

@@ -1,0 +1,63 @@
+name: Release
+
+# Automated releases so shipping is boring and the changelog is never stale.
+#
+# release-please owns CHANGELOG.md and creates a release PR from conventional
+# commits on main. Merging that PR creates the GitHub release and the git tag.
+# Manual releases are still possible by labelling a PR `release-please-manual`.
+#
+# Deliberately minimal permissions: this workflow only needs to push a
+# changelog commit and create a tag.
+
+permissions:
+  contents: write
+  pull-requests: write
+
+on:
+  push:
+    branches: [main]
+  # Allows cutting a release from a non-main branch.
+  release_created:
+    types: ["published"]
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  release-please:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: googleapis/release-please-action@v4
+        id: release
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+          # The action.yml lives at the repository root, which is what the
+          # Marketplace requires.
+          config-file: release-please-config.json
+
+  # Verifies that the committed bundle in a release tag actually matches its
+  # source. Runs after release-please tags, so a release can never ship a
+  # bundle that drifted from src/.
+  verify-release-artifact:
+    needs: release-please
+    if: steps.release.outputs.tag_created == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: ${{ steps.release.outputs.tag_name }}
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+      - run: npm ci --no-audit --no-fund
+      - run: npm run check:dist
+      - name: Confirm dist/ was actually committed to the release
+        run: |
+          if [ ! -f dist/index.js ]; then
+            echo "::error::dist/index.js is missing from the release tag. A JavaScript action must commit its bundle."
+            exit 1
+          fi
+          echo "dist/index.js present ($(wc -c < dist/index.js) bytes)"

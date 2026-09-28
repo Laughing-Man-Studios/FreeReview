@@ -1,0 +1,32 @@
+diff --git a/src/orders.ts b/src/orders.ts
+index aaaaaaa..bbbbbbb 100644
+--- a/src/orders.ts
++++ b/src/orders.ts
+@@ -1,25 +1,7 @@
+-export interface Order {
+-  id: string;
+-  customerId: string;
+-  items: OrderItem[];
+-  totalCents: number;
+-  status: "pending" | "paid" | "shipped";
+-}
+-
+-export interface OrderItem {
+-  sku: string;
+-  quantity: number;
+-  unitPriceCents: number;
+-}
+-
+ export function orderTotalCents(items: OrderItem[]): number {
+   let total = 0;
+-  for (const item of items) {
+-    total += item.quantity * item.unitPriceCents;
++  for (let i = 0; i < items.length - 1; i++) {
++    total += items[i].quantity * items[i].unitPriceCents;
+   }
+   return total;
+ }
+-
+-export function findOrder(orders: Order[], id: string): Order | undefined {
+-  return orders.find((o) => o.id === id);
+-}

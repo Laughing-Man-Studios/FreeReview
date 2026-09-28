@@ -338,7 +338,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     tokenSafetyMultiplier: 1.25,
     requestTimeoutMs: 120_000,
     runBudgetMs: 8 * 60_000,
-    referer: "https://github.com/Rogibb111/FreeReview",
+    referer: "https://github.com/Laughing-Man-Studios/FreeReview",
     title: "FreeReview",
   };
 

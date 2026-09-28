@@ -227,7 +227,7 @@ function loadConfig(env = process.env) {
     tokenSafetyMultiplier: 1.25,
     requestTimeoutMs: 12e4,
     runBudgetMs: 8 * 6e4,
-    referer: "https://github.com/Rogibb111/FreeReview",
+    referer: "https://github.com/Laughing-Man-Studios/FreeReview",
     title: "FreeReview"
   };
   validateConfig(config);

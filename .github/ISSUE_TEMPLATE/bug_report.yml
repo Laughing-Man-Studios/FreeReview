@@ -1,0 +1,86 @@
+name: Bug report
+description: Something is wrong or unexpected
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Most reports are diagnosed from the **diagnostic code** alone. The step
+        summary at the bottom of the workflow run lists every code the action
+        recorded.
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostic codes
+      description: Copy the codes from the "Diagnostics" table in the run's step summary.
+      placeholder: |
+        | Code | Count |
+        | --- | --- |
+        | PR_TOO_LARGE | 1 |
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+    validations:
+      required: true
+
+  - type: textarea
+    id: review-body
+    attributes:
+      label: Published review body
+      description: If a review was published, paste its body. This shows the model, commit, and file counts.
+      render: markdown
+
+  - type: input
+    id: free-tier
+    attributes:
+      label: "Is your OpenRouter account a $0 account (no credits added)?"
+      description: Determines which daily request allowance applies: 50/day without credits, 1000/day with $10+.
+      placeholder: "yes"
+    validations:
+      required: true
+
+  - type: input
+    id: free-review-used
+    attributes:
+      label: "OpenRouter requests used this run"
+      description: From the step summary's "OpenRouter requests used" row.
+      placeholder: "2"
+
+  - type: dropdown
+    id: privacy-mode
+    attributes:
+      label: privacy_mode
+      options: ["strict", "relaxed"]
+    validations:
+      required: true
+
+  - type: input
+    id: action-version
+    attributes:
+      label: Action version
+      placeholder: "v1"
+    validations:
+      required: true
+
+  - type: textarea
+    id: workflow
+    attributes:
+      label: Relevant part of your workflow
+      description: Trigger, permissions, and concurrency block. Redact secrets.
+      render: yaml
+
+  - type: textarea
+    id: extra
+    attributes:
+      label: Anything else
+      description: |
+        Do not paste source code, diffs, or model output into public issues.
+        If you need `debug_payloads: true` to diagnose, note that it writes
+        prompts and responses to the workflow log, which exposes your
+        proprietary source.

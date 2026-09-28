@@ -1,0 +1,61 @@
+name: Feature request
+description: Suggest a capability or a change
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        This action is deliberately narrow. Before proposing, check that your
+        idea survives these constraints, which are design decisions rather than
+        limitations:
+
+        - **Advisory only.** It will not approve, request changes, or block a
+          merge. Findings never fail a workflow.
+        - **No code execution.** It never checks out, builds, installs, tests,
+          or runs your code. Everything comes from the GitHub API.
+        - **Private repositories, same-repository branches only.** Fork PRs are
+          detected and skipped without sending anything anywhere.
+        - **$0 only.** Every request uses an explicit `:free` model. There is no
+          paid fallback, by design.
+        - **No persistent caching** of model results, in v1. Stale review
+          results on code review are worse than no results.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem does this solve?
+      description: Describe the situation, not the solution.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed change
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+
+  - type: dropdown
+    id: v1-or-later
+    attributes:
+      label: Does this need to be in v1?
+      description: "If it can wait, it belongs on the roadmap rather than blocking a release."
+      options:
+        - "Yes — v1 is materially worse without it"
+        - "No — v1 is fine without it"
+    validations:
+      required: true
+
+  - type: textarea
+    id: quota-cost
+    attributes:
+      label: Effect on the free-tier request budget
+      description: |
+        The default allowance is 50 requests/day for a $0 account, and failed
+        requests count. Any feature that adds a request per chunk multiplies
+        against that. Say how many requests your proposal would add.
