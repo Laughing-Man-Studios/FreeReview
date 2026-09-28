@@ -20,7 +20,7 @@
     "eval": "tsx eval/run.ts"
   },
   "devDependencies": {
-    "@eslint/js": "^9.20.0",
+    "@eslint/js": "^10.0.1",
     "@types/node": "^24.0.0",
     "eslint": "^9.20.0",
     "fast-check": "^4.0.0",
