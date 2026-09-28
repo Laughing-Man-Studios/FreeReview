@@ -40,7 +40,7 @@ body:
     id: free-tier
     attributes:
       label: "Is your OpenRouter account a $0 account (no credits added)?"
-      description: Determines which daily request allowance applies: 50/day without credits, 1000/day with $10+.
+      description: "Determines which daily request allowance applies: 50/day without credits, 1000/day with $10+."
       placeholder: "yes"
     validations:
       required: true

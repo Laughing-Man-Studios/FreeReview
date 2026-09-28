@@ -1,46 +1,79 @@
 version: 2
 
 updates:
-  # All npm dev dependencies are shipped only inside the bundle, never
-  # installed by consumers, so they are grouped into a single reviewable PR.
-  # Grouping also stops a fresh repository opening six separate PRs the moment
-  # it is created.
+  # All npm dependencies are dev-only. Nothing here is installed by consumers:
+  # the published artifact is the committed `dist/` bundle, built by tsup. A
+  # broken bump therefore cannot break a consumer's install, but it can
+  # silently change emitted output — which `npm run check:dist` is the last
+  # line of defence against.
+  #
+  # Strategy: one grouped PR for minor and patch updates, and **majors ignored**.
+  # Majors get applied deliberately, one at a time, with a test run and a real
+  # review. A green Dependabot run is not evidence that a major upgrade is
+  # safe, and a weekly batch of seven majors against a young project is how you
+  # lose a weekend to a compiler migration.
   - package-ecosystem: npm
     directory: "/"
     schedule:
       interval: weekly
-    open-pull-requests-limit: 5
+      day: monday
+    open-pull-requests-limit: 3
     commit-message:
       prefix: "chore(deps)"
     labels:
       - dependencies
     groups:
+      # One PR for everything routine, so the weekly run produces something
+      # reviewable rather than a wall of noise.
       dev-dependencies:
         patterns:
           - "*"
         update-types:
           - minor
           - patch
-        # Major bumps are proposed one at a time so a breaking upgrade can be
-        # reviewed on its own. They have broken the build in this project
-        # before (TypeScript 5 -> 7, vitest 3 -> 5), and a green Dependabot
-        # run is not evidence that a major is safe.
     ignore:
-      # Held back deliberately. Uncomment when a bump is actually tested.
-      # - dependency-name: "typescript"
-      #   versions: [">=7"]
-      # - dependency-name: "vitest"
-      #   versions: [">=5"]
-      # - dependency-name: "@types/node"
-      #   versions: [">=26"]
+      # Majors held back on purpose. To adopt one, remove its entry here, run
+      # `npm install`, then `npm run typecheck && npm run lint && npm test &&
+      # npm run build && npm run check:dist` before merging.
+      #
+      # Note: two of these are two majors apart, not one. @types/node 24 -> 26
+      # must not land, because the action declares `runs.using: node24` and a
+      # newer @types/node would silently change the type surface the build is
+      # validated against.
+      - dependency-name: "typescript"
+        versions: [">=6"]
+      - dependency-name: "vitest"
+        versions: [">=4"]
+      - dependency-name: "@types/node"
+        versions: [">=25"]
+      - dependency-name: "eslint"
+        versions: [">=10"]
+      - dependency-name: "@eslint/js"
+        versions: [">=10"]
+      - dependency-name: "typescript-eslint"
+        versions: [">=9"]
+      - dependency-name: "tsup"
+        versions: [">=9"]
+      - dependency-name: "msw"
+        versions: [">=3"]
+      - dependency-name: "fast-check"
+        versions: [">=5"]
 
+  # Pinned to the majors this project is validated against. See the reasoning
+  # above: these run in the workflow that gates every other check, so they are
+  # bumped deliberately rather than on a schedule.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
-      interval: weekly
+      interval: monthly
     labels:
       - dependencies
     groups:
       actions:
         patterns:
           - "*"
+    ignore:
+      - dependency-name: "actions/checkout"
+        versions: [">=7"]
+      - dependency-name: "actions/setup-node"
+        versions: [">=7"]
