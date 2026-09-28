@@ -246,6 +246,22 @@ function parseModelList(
   });
 }
 
+/**
+ * Read the debug flag without validating the rest of the configuration.
+ *
+ * The logger must exist before config is validated, because a CONFIG_INVALID
+ * run still needs to report why. Returns false on anything unparseable rather
+ * than throwing, since the full validation happens moments later in
+ * `loadConfig` and will report the problem properly there.
+ */
+export function debugPayloadsFromEnv(env: NodeJS.ProcessEnv = process.env): boolean {
+  try {
+    return readBool(env, "debug_payloads", false);
+  } catch {
+    return false;
+  }
+}
+
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const openrouterApiKey = readRaw(env, "openrouter_api_key");
   if (openrouterApiKey === undefined) {

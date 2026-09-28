@@ -151,6 +151,13 @@ function parseModelList(value, input) {
     };
   });
 }
+function debugPayloadsFromEnv(env = process.env) {
+  try {
+    return readBool(env, "debug_payloads", false);
+  } catch {
+    return false;
+  }
+}
 function loadConfig(env = process.env) {
   const openrouterApiKey = readRaw(env, "openrouter_api_key");
   if (openrouterApiKey === void 0) {
@@ -373,10 +380,340 @@ function createLogger(opts) {
   return logger;
 }
 
-// src/run.ts
-function emptyOutputs(status) {
+// src/github/client.ts
+var API_BASE = "https://api.github.com";
+var GITHUB_API_VERSION = "2026-03-10";
+var ACCEPT_JSON = "application/vnd.github+json";
+var GithubError = class extends Error {
+  constructor(kind, status, message, retryAfterSeconds) {
+    super(message);
+    this.kind = kind;
+    this.status = status;
+    this.retryAfterSeconds = retryAfterSeconds;
+    this.name = "GithubError";
+  }
+  kind;
+  status;
+  retryAfterSeconds;
+  /** Whether a bounded retry has any chance of succeeding. */
+  get retryable() {
+    return this.kind === "rate_limited" || this.kind === "server";
+  }
+  /**
+   * Whether this is GitHub's *secondary* rate limit (abuse detection) rather
+   * than the primary hourly quota. Secondary limits apply to content-creating
+   * endpoints and carry a `Retry-After`.
+   */
+  get isSecondaryRateLimit() {
+    return this.status === 403 && this.retryAfterSeconds !== void 0;
+  }
+};
+var defaultSleep = (ms) => new Promise((r) => setTimeout(r, ms));
+function classify(status, body, retryAfterHeader) {
+  const message = typeof body === "object" && body !== null && "message" in body ? String(body.message) : `GitHub API returned ${status}`;
+  const parsedRetryAfter = retryAfterHeader ? Number.parseInt(retryAfterHeader, 10) : Number.NaN;
+  const retryAfter = Number.isFinite(parsedRetryAfter) ? parsedRetryAfter : void 0;
+  let kind;
+  if (status === 401) {
+    kind = "forbidden";
+  } else if (status === 403) {
+    kind = retryAfter !== void 0 ? "rate_limited" : "forbidden";
+  } else if (status === 429) {
+    kind = "rate_limited";
+  } else if (status === 404 || status === 410) {
+    kind = "not_found";
+  } else if (status >= 500) {
+    kind = "server";
+  } else {
+    kind = "client";
+  }
+  return new GithubError(kind, status, message, retryAfter);
+}
+var GithubClient = class {
+  token;
+  sleep;
+  maxRetries;
+  fetchImpl;
+  baseUrl;
+  userAgent;
+  /** Wall-clock budget so a hung GitHub cannot stall the whole run. */
+  constructor(options) {
+    this.token = options.token;
+    this.sleep = options.sleep ?? defaultSleep;
+    this.maxRetries = options.maxRetries ?? 3;
+    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.baseUrl = options.baseUrl ?? API_BASE;
+    this.userAgent = options.userAgent ?? "FreeReview";
+  }
+  headers(accept) {
+    return {
+      Authorization: `Bearer ${this.token}`,
+      Accept: accept,
+      "X-GitHub-Api-Version": GITHUB_API_VERSION,
+      "User-Agent": this.userAgent
+    };
+  }
+  /**
+   * Idempotent GET with bounded exponential backoff.
+   *
+   * Retries only `retryable` errors. A 404 is never retried: if the PR is not
+   * visible to this token, waiting will not change that.
+   */
+  async get(path, options) {
+    const url = `${this.baseUrl}${path}`;
+    let lastError;
+    for (let attempt = 0; attempt <= this.maxRetries; attempt += 1) {
+      let response;
+      try {
+        response = await this.fetchImpl(url, {
+          method: "GET",
+          headers: this.headers(options?.accept ?? ACCEPT_JSON)
+        });
+      } catch (cause) {
+        if (attempt === this.maxRetries) throw cause;
+        await this.sleep(backoffMs(attempt));
+        continue;
+      }
+      if (response.ok) {
+        return await response.json();
+      }
+      const body = await safeJson(response);
+      const error = classify(response.status, body, response.headers.get("retry-after"));
+      lastError = error;
+      if (!error.retryable || attempt === this.maxRetries) {
+        throw error;
+      }
+      const waitMs = error.retryAfterSeconds !== void 0 ? Math.min(error.retryAfterSeconds * 1e3, 6e4) : backoffMs(attempt);
+      await this.sleep(waitMs);
+    }
+    throw lastError ?? new GithubError("server", 0, "GitHub request failed with no response");
+  }
+  /**
+   * POST with NO automatic retry.
+   *
+   * Content-creating endpoints (review creation) trigger secondary rate limits
+   * and a retried POST can duplicate a review. Retry policy for publication
+   * lives in `github/publish.ts` where it can be explicit about idempotency.
+   */
+  async post(path, body) {
+    const response = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      method: "POST",
+      headers: { ...this.headers(ACCEPT_JSON), "Content-Type": "application/json" },
+      body: JSON.stringify(body)
+    });
+    if (response.ok) return await response.json();
+    const payload = await safeJson(response);
+    throw classify(response.status, payload, response.headers.get("retry-after"));
+  }
+  /**
+   * Follow GitHub pagination to completion, with a hard page cap.
+   *
+   * The cap exists so a pathological response cannot spin forever. `pulls/{n}/files`
+   * documents a 3000-file maximum, so 30 pages of 100 is the true ceiling.
+   */
+  async getAllPages(path, options) {
+    const perPage = options?.perPage ?? 100;
+    const maxPages = options?.maxPages ?? 40;
+    const separator = path.includes("?") ? "&" : "?";
+    const out = [];
+    for (let page = 1; page <= maxPages; page += 1) {
+      const batch = await this.get(
+        `${path}${separator}per_page=${perPage}&page=${page}`
+      );
+      if (!Array.isArray(batch) || batch.length === 0) break;
+      out.push(...batch);
+      if (batch.length < perPage) break;
+    }
+    return out;
+  }
+};
+function backoffMs(attempt) {
+  const base = Math.min(2 ** attempt * 250, 8e3);
+  return base / 2 + Math.random() * (base / 2);
+}
+async function safeJson(response) {
+  try {
+    return await response.json();
+  } catch {
+    return null;
+  }
+}
+var SUPPORTED_PR_EVENTS = /* @__PURE__ */ new Set([
+  "opened",
+  "reopened",
+  "synchronize"
+]);
+function asString(value) {
+  return typeof value === "string" && value.length > 0 ? value : null;
+}
+function asNumber(value) {
+  return typeof value === "number" && Number.isFinite(value) ? value : null;
+}
+function parseEventContext(env = process.env) {
+  const eventName = asString(env["GITHUB_EVENT_NAME"]);
+  if (eventName === null) {
+    return { ok: false, code: "INVALID_GITHUB_CONTEXT", detail: "GITHUB_EVENT_NAME is not set." };
+  }
+  if (eventName !== "pull_request") {
+    return {
+      ok: false,
+      code: "UNSUPPORTED_EVENT",
+      detail: `This action only runs on 'pull_request'. Got '${eventName}'.`
+    };
+  }
+  const eventPath = asString(env["GITHUB_EVENT_PATH"]);
+  if (eventPath === null) {
+    return { ok: false, code: "INVALID_GITHUB_CONTEXT", detail: "GITHUB_EVENT_PATH is not set." };
+  }
+  let payload;
+  try {
+    payload = JSON.parse(fs.readFileSync(eventPath, "utf8"));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "unparseable JSON";
+    return {
+      ok: false,
+      code: "INVALID_GITHUB_CONTEXT",
+      detail: `Could not read the event payload at GITHUB_EVENT_PATH: ${detail}`
+    };
+  }
+  if (typeof payload !== "object" || payload === null) {
+    return { ok: false, code: "INVALID_GITHUB_CONTEXT", detail: "Event payload is not an object." };
+  }
+  const root = payload;
+  const action = asString(root["action"]);
+  const repository = root["repository"];
+  if (typeof repository !== "object" || repository === null) {
+    return {
+      ok: false,
+      code: "INVALID_GITHUB_CONTEXT",
+      detail: "Event payload has no repository object."
+    };
+  }
+  const repoObj = repository;
+  const owner = asString(repoObj["owner"]?.["login"]);
+  const repo = asString(repoObj["name"]);
+  if (owner === null || repo === null) {
+    return {
+      ok: false,
+      code: "INVALID_GITHUB_CONTEXT",
+      detail: "Event payload repository is missing owner.login or name."
+    };
+  }
+  const pullRequest = root["pull_request"];
+  if (typeof pullRequest !== "object" || pullRequest === null) {
+    return {
+      ok: false,
+      code: "INVALID_GITHUB_CONTEXT",
+      detail: "Event payload has no pull_request object."
+    };
+  }
+  const prObj = pullRequest;
+  const pullNumber = asNumber(prObj["number"]);
+  if (pullNumber === null) {
+    return {
+      ok: false,
+      code: "INVALID_GITHUB_CONTEXT",
+      detail: "Event payload pull_request.number is missing or not a number."
+    };
+  }
+  const head = prObj["head"];
+  const eventHeadSha = asString(
+    (typeof head === "object" && head !== null ? head : {})["sha"]
+  );
   return {
-    status,
+    ok: true,
+    context: { eventName, action: action ?? "", owner, repo, pullNumber, eventHeadSha }
+  };
+}
+
+// src/github/pr.ts
+function prPath(owner, repo, pullNumber) {
+  return `/repos/${owner}/${repo}/pulls/${pullNumber}`;
+}
+async function getPullRequest(client, owner, repo, pullNumber) {
+  return client.get(prPath(owner, repo, pullNumber));
+}
+async function listPullRequestFiles(client, owner, repo, pullNumber) {
+  return client.getAllPages(`${prPath(owner, repo, pullNumber)}/files`);
+}
+
+// src/pipeline/eligibility.ts
+function skip(code, message, context) {
+  return { eligible: false, diagnostic: { code, severity: "expected", message, ...context ? { context } : {} } };
+}
+function fail(code, message, context) {
+  return { eligible: false, diagnostic: { code, severity: "failure", message, ...{} } };
+}
+function evaluateEligibility(input) {
+  const { event, pr } = input;
+  if (!SUPPORTED_PR_EVENTS.has(event.action)) {
+    return skip(
+      "UNSUPPORTED_EVENT",
+      `PR event '${event.action || "(none)"}' is not one of ${[...SUPPORTED_PR_EVENTS].join(", ")}.`,
+      { action: event.action || "(none)" }
+    );
+  }
+  if (!pr.head?.sha) {
+    return fail("INVALID_GITHUB_CONTEXT", "PR head SHA is missing from the API response.");
+  }
+  if (!pr.head?.repo) {
+    return skip(
+      "UNSUPPORTED_PR_SOURCE",
+      "The PR head repository is no longer available (deleted or inaccessible)."
+    );
+  }
+  if (!pr.base?.repo) {
+    return fail("INVALID_GITHUB_CONTEXT", "PR base repository is missing from the API response.");
+  }
+  if (pr.merged) {
+    return skip("PR_ALREADY_MERGED", "The pull request has already been merged.");
+  }
+  if (pr.state !== "open") {
+    return skip("PR_CLOSED", "The pull request is not open.", { state: pr.state });
+  }
+  if (pr.draft) {
+    return skip("DRAFT_PR", "The pull request is a draft.");
+  }
+  const baseIsPrivate = pr.base.repo.private;
+  if (!baseIsPrivate) {
+    return skip(
+      "PUBLIC_REPOSITORY",
+      "The base repository is public. This action only reviews private repositories by default, because it sends diff contents to an external inference provider.",
+      { base_repo: pr.base.repo.full_name }
+    );
+  }
+  if (pr.head.repo.full_name !== pr.base.repo.full_name) {
+    return skip(
+      "UNSUPPORTED_PR_SOURCE",
+      "The pull request head is in a different repository (a fork or external contribution). Reviewing it would mean sending third-party code to an external inference provider, which v1 does not do.",
+      { head_repo: pr.head.repo.full_name, base_repo: pr.base.repo.full_name }
+    );
+  }
+  if (event.eventHeadSha !== null && event.eventHeadSha !== pr.head.sha) ;
+  const totalChangedLines = pr.additions + pr.deletions;
+  return {
+    eligible: true,
+    totalChangedLines,
+    changedFileCount: pr.changed_files,
+    identity: {
+      owner: pr.base.repo.owner.login,
+      repo: pr.base.repo.name,
+      pullNumber: pr.number,
+      baseSha: pr.base.sha,
+      reviewHeadSha: pr.head.sha,
+      promptVersion: input.promptVersion,
+      configVersion: input.configVersion
+    }
+  };
+}
+
+// src/prompt/version.ts
+var PROMPT_VERSION = "2026-09-27.1";
+var CONFIG_VERSION = "2026-09-27.1";
+
+// src/run.ts
+function baseOutputs() {
+  return {
     findings_count: "0",
     unanchored_count: "0",
     files_reviewed: "0",
@@ -419,22 +756,92 @@ function summarise(logger, outputs) {
     ""
   ].join("\n");
 }
+function resolveStatus(diagnostics) {
+  if (diagnostics.some((d) => d.severity === "failure")) return "failed";
+  const skipOrder = [
+    // 1. event
+    ["skipped_unsupported_event", /* @__PURE__ */ new Set(["UNSUPPORTED_EVENT"])],
+    // 2. structural metadata (also catches a deleted head repository)
+    ["skipped_unsupported_pr_source", /* @__PURE__ */ new Set(["UNSUPPORTED_PR_SOURCE"])],
+    // 3. PR state
+    ["skipped_pr_closed", /* @__PURE__ */ new Set(["PR_ALREADY_MERGED", "PR_CLOSED"])],
+    ["skipped_draft_pr", /* @__PURE__ */ new Set(["DRAFT_PR"])],
+    // 4. trust boundary: privacy, then provenance
+    ["skipped_public_repository", /* @__PURE__ */ new Set(["PUBLIC_REPOSITORY"])],
+    // 5. everything downstream of the gate
+    ["skipped_diff_unavailable", /* @__PURE__ */ new Set(["DIFF_FETCH_FAILED", "DIFF_TRUNCATED"])],
+    ["skipped_pr_too_large", /* @__PURE__ */ new Set(["PR_TOO_LARGE", "CONTEXT_TOO_LARGE"])],
+    ["skipped_no_reviewable_files", /* @__PURE__ */ new Set(["NO_REVIEWABLE_FILES"])],
+    ["skipped_no_eligible_model", /* @__PURE__ */ new Set(["NO_ELIGIBLE_MODEL", "NO_ELIGIBLE_PROVIDER"])],
+    [
+      "skipped_quota_exhausted",
+      /* @__PURE__ */ new Set([
+        "OPENROUTER_QUOTA_EXHAUSTED",
+        "REQUEST_BUDGET_EXHAUSTED",
+        "RATE_LIMIT_BUDGET_THROTTLED"
+      ])
+    ],
+    [
+      "skipped_upstream_unavailable",
+      /* @__PURE__ */ new Set(["OPENROUTER_RATE_LIMITED", "OPENROUTER_UNAVAILABLE"])
+    ],
+    ["skipped_cancelled", /* @__PURE__ */ new Set(["REQUEST_CANCELLED"])],
+    ["skipped_stale", /* @__PURE__ */ new Set(["STALE_HEAD_SHA", "HEAD_CHANGED_MID_RUN"])],
+    // Every remaining expected-severity code is something that stopped a
+    // usable review from being produced.
+    [
+      "skipped_no_usable_output",
+      /* @__PURE__ */ new Set([
+        "MODEL_OUTPUT_INVALID",
+        "MODEL_OUTPUT_EMPTY_RETRYABLE",
+        "MODEL_OUTPUT_TRUNCATED",
+        "MODEL_OUTPUT_TOO_LARGE",
+        "FINDING_COUNT_EXCEEDED",
+        "INJECTION_COMPLIANCE_SUSPECTED",
+        "GITHUB_PUBLISH_FAILED",
+        "GITHUB_PUBLISH_DEGRADED"
+      ])
+    ]
+  ];
+  const codes = new Set(diagnostics.map((d) => d.code));
+  for (const [status, members] of skipOrder) {
+    if ([...members].some((code) => codes.has(code))) return status;
+  }
+  if (diagnostics.length > 0) return "skipped_no_usable_output";
+  return "reviewed";
+}
 async function run(env = process.env) {
-  const probeLogger = createLogger();
+  const logger = createLogger({ debug: debugPayloadsFromEnv(env) });
+  const eventResult = parseEventContext(env);
+  if (!eventResult.ok) {
+    logger.log(eventResult.code, eventResult.detail);
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+  const event = eventResult.context;
+  logger.debug("event context parsed", {
+    owner: event.owner,
+    repo: event.repo,
+    pull: event.pullNumber,
+    action: event.action
+  });
+  const token = env["GITHUB_TOKEN"];
+  if (token === void 0 || token.length === 0) {
+    logger.log(
+      "MISSING_CREDENTIALS",
+      "GITHUB_TOKEN is not available. Invoke this action from a GitHub Actions workflow with 'permissions: pull-requests: write'."
+    );
+    return finish(logger, baseOutputs(), "failed");
+  }
   let config;
   try {
     config = loadConfig(env);
   } catch (error) {
     if (error instanceof ConfigError) {
-      probeLogger.log("CONFIG_INVALID", error.detail, { input: error.input });
-      const outputs2 = emptyOutputs("failed");
-      appendStepSummary(summarise(probeLogger, outputs2), env);
-      appendOutputs(outputs2, env);
-      return outputs2;
+      logger.log("CONFIG_INVALID", error.detail, { input: error.input });
+      return finish(logger, baseOutputs(), "failed");
     }
     throw error;
   }
-  const logger = createLogger({ debug: config.debugPayloads });
   logger.info("FreeReview starting", {
     privacy_mode: config.privacyMode,
     models: config.models.length,
@@ -451,9 +858,82 @@ async function run(env = process.env) {
       "debug_payloads=true: full prompt bodies and model responses will be written to the workflow log. This exposes proprietary source code to anyone who can read the log."
     );
   }
-  const outputs = emptyOutputs("skipped_pipeline_not_implemented");
-  appendStepSummary(summarise(logger, outputs), env);
-  appendOutputs(outputs, env);
+  const client = new GithubClient({ token });
+  let pr;
+  try {
+    pr = await getPullRequest(client, event.owner, event.repo, event.pullNumber);
+  } catch (error) {
+    if (error instanceof GithubError) {
+      const code = error.kind === "not_found" || error.kind === "forbidden" ? "INVALID_GITHUB_CONTEXT" : "DIFF_FETCH_FAILED";
+      logger.log(
+        code,
+        `Could not read pull request #${event.pullNumber}: ${error.message}`,
+        { status: error.status, kind: error.kind }
+      );
+      return finish(logger, baseOutputs(), error.kind === "server" ? "skipped_early_exit" : "failed");
+    }
+    throw error;
+  }
+  const eligibility = evaluateEligibility({
+    event,
+    pr,
+    promptVersion: PROMPT_VERSION,
+    configVersion: CONFIG_VERSION
+  });
+  if (!eligibility.eligible) {
+    logger.record(eligibility.diagnostic);
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+  const { identity, totalChangedLines, changedFileCount } = eligibility;
+  logger.info("PR is eligible for review", {
+    pull: identity.pullNumber,
+    head: identity.reviewHeadSha.slice(0, 7),
+    base: identity.baseSha.slice(0, 7),
+    changed_lines: totalChangedLines,
+    changed_files: changedFileCount
+  });
+  let files;
+  try {
+    files = await listPullRequestFiles(client, identity.owner, identity.repo, identity.pullNumber);
+  } catch (error) {
+    if (error instanceof GithubError) {
+      logger.log("DIFF_FETCH_FAILED", `Could not list changed files: ${error.message}`, {
+        status: error.status,
+        kind: error.kind
+      });
+      return finish(logger, baseOutputs(), "skipped_early_exit");
+    }
+    throw error;
+  }
+  const binaryCount = files.filter((f) => !f.patch).length;
+  logger.info("changed files retrieved", {
+    total: files.length,
+    reported: changedFileCount,
+    without_patch: binaryCount
+  });
+  if (files.length < changedFileCount) {
+    logger.log(
+      "DIFF_TRUNCATED",
+      `GitHub reported ${changedFileCount} changed files but returned ${files.length}. The change list was truncated and the review would be incomplete.`,
+      { reported: changedFileCount, received: files.length }
+    );
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+  return finish(
+    logger,
+    { ...baseOutputs(), files_reviewed: String(files.length) },
+    "skipped_pipeline_not_implemented"
+  );
+}
+function finish(logger, partial, statusHint) {
+  const resolved = resolveStatus(logger.diagnostics);
+  const outputs = {
+    ...partial,
+    // A diagnostics-derived status is always more informative than the hint.
+    status: resolved === "reviewed" && statusHint !== "reviewed" ? statusHint : resolved
+  };
+  appendStepSummary(summarise(logger, outputs));
+  appendOutputs(outputs);
   return outputs;
 }
 
