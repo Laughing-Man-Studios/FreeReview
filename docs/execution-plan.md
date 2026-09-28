@@ -1,7 +1,7 @@
 # FreeReview — Execution Plan
 
-**Status:** Agreed, ready to implement
-**Date:** 2026-09-27
+**Status:** In progress — Phases 0–4 complete; `run.ts` ends at the Phase 4 boundary
+**Date:** 2026-09-27 (Phase 4 completed 2026-09-28)
 **Canonical location:** this file; copied verbatim to `docs/execution-plan.md` at implementation start
 **Derived from:** `docs/plan.md` (design record — see its new status/supersedes header)
 
@@ -715,9 +715,21 @@ Each exit condition is **testable**, not "done".
 `pipeline/filter.ts` (binary, truncated, minified — avg line length > 300 chars, generated dirs, lockfile-body exclusion with dependency-change reporting); `pipeline/tokens.ts`; `pipeline/chunk.ts`; `diff/render.ts` with fence/role neutralisation.
 **Exit:** property test proves no chunk can exceed `max_input_tokens`; injection-rendering snapshot tests show ` ``` `, `system:`, `<|im_start|>` neutralised; filtering table-driven with a test per rule.
 
-### Phase 4 — OpenRouter client, models, scheduler (2 days)
+### Phase 4 — OpenRouter client, models, scheduler (2 days) — **COMPLETE**
 `llm/{client,errors,catalog,quota,scheduler}.ts`, `model/{config,capability}.ts`.
 **Exit:** msw tests demonstrate three-guard enforcement, the §8.3 retry matrix, every retry counted, deterministic fallback order, daily-reserve trip, cancellation aborting in-flight work, `error` detected on HTTP 200; no test hits the network.
+
+**Delivered as:** `llm/{client,errors,catalog,scheduler}.ts`. Quota and catalog probes both landed in `llm/catalog.ts` rather than a separate `quota.ts` — they are one concern (a free, unauthenticated-or-single-key GET that answers "can this run proceed") and splitting them put a one-function file next to a three-function one.
+
+Deviations from the plan, and why:
+
+- **`llm/quota.ts` folded into `llm/catalog.ts`.** Both are free preflight GETs against a third-party API that must never be fatal. One module, one "could not tell" convention (`null`).
+- **`model/config.ts` and `model/capability.ts` folded into `src/config.ts`.** `ModelDefinition`, `eligibleModels`, and `capabilityModeFor` are pure config concerns; a separate directory added import indirection for no boundary.
+- **`attempts` added to the success branch of `TaskOutcome`.** Planned as failure-only. In practice a run that *succeeded on its second model* is the case a maintainer most needs explained, and a trail that vanishes on success is the wrong shape for the step summary.
+- **Truncated-output handling moved to `errorType: max_tokens_exceeded`, classified `fatal`.** A reasoning model that spent its whole budget on reasoning tokens will not produce content on a retry, so this must not consume a retry from the 50/day allowance. Distinguished from warm-up-empty (`retryable`) by `finish_reason` plus the reasoning-token ratio.
+- **The quota preflight sits after chunk selection, not after config.** The comparison is against the number of requests actually *planned*, which is only known once `max_requests_per_run` has trimmed the chunk list. The scheduler still receives the true remaining count and applies the reserve itself, so the two cannot drift.
+
+Wiring: `run.ts` probes the catalog just after file retrieval (before the size gate, since a model that cannot serve any request is a cheaper thing to reject first) and the quota after chunk selection, then stops at the `skipped_pipeline_not_implemented` boundary with **zero requests sent**. Phase 5 replaces that boundary with the prompt and the first real call.
 
 ### Phase 5 — Prompt, schema, parsing (1.5 days)
 `schema/{finding,json-schema}.ts`, `prompt/{system,user}.ts`, `parse/{structured,text,repair}.ts`.

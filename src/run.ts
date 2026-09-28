@@ -11,7 +11,15 @@
  */
 
 import { appendFileSync } from "node:fs";
-import { ConfigError, debugPayloadsFromEnv, loadConfig, type Config } from "./config.js";
+import {
+  capabilityModeFor,
+  ConfigError,
+  debugPayloadsFromEnv,
+  eligibleModels,
+  loadConfig,
+  type Config,
+} from "./config.js";
+import { evaluateModel, fetchCatalog, fetchQuota, quotaDecision } from "./llm/catalog.js";
 import { createLogger, type Diagnostic, type DiagnosticCode, type Logger } from "./diagnostics.js";
 import { GithubClient, GithubError } from "./github/client.js";
 import { parseEventContext } from "./github/context.js";
@@ -364,7 +372,46 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     return finish(logger, baseOutputs(), "skipped_early_exit");
   }
 
-  // --- 7. Coarse size gate ------------------------------------------------
+  // --- 7. Model eligibility and quota ------------------------------------
+  // Both probes are free and both exist to avoid spending a request on
+  // something knowable in advance. Neither is fatal: a probe failure degrades to
+  // the configured assumptions, because refusing to review whenever OpenRouter
+  // has a bad minute would make the tool useless.
+  const catalog = await fetchCatalog();
+  const usableModels = eligibleModels(config).filter((model) => {
+    const mode = capabilityModeFor(model);
+    const entry = evaluateModel(model, catalog, {
+      inputTokens: config.maxInputTokens,
+      outputTokens: config.maxOutputTokens,
+      mode,
+    });
+    if (entry.problem === null) return true;
+    logger.debug("model not usable", { model: model.id, reason: entry.problem });
+    return false;
+  });
+
+  if (usableModels.length === 0) {
+    logger.log(
+      "NO_ELIGIBLE_MODEL",
+      catalog === null
+        ? "No configured model is usable, and the OpenRouter catalog could not be read to " +
+          "confirm why. Check that the configured models are free, present, and support the " +
+          "required capabilities."
+        : "No configured free model satisfies this configuration. Under strict privacy, a " +
+          "model must have a ZDR endpoint with no data collection, which not every free " +
+          "provider offers. Try privacy_mode=relaxed or a different model.",
+      { configured: config.models.length, catalog_available: catalog !== null },
+    );
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+
+  logger.info("eligible models", {
+    count: usableModels.length,
+    primary: usableModels[0]?.id,
+    catalog: catalog === null ? "unavailable" : "verified",
+  });
+
+  // --- 8. Coarse size gate ------------------------------------------------
   // Rejected before any parsing, because it is the cheap decision and its only
   // job is to avoid spending quota on a PR that could never produce a useful
   // review.
@@ -504,6 +551,23 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
         `(${config.maxRequestsPerRun}). ${affordable.dropped} chunk(s) were not reviewed.`,
     );
   }
+
+  // --- Quota preflight ----------------------------------------------------
+  // Placed after chunk selection because the comparison is against the number
+  // of requests actually planned, which is only known once the run budget has
+  // trimmed the chunk list. The scheduler receives the *true* remaining count
+  // and applies the reserve itself, so the two cannot drift.
+  const quota = await fetchQuota(config);
+  const decision = quotaDecision(quota, config.dailyReserve, affordable.selected.length);
+
+  if (!decision.proceed) {
+    logger.log("OPENROUTER_QUOTA_EXHAUSTED", decision.reason, {
+      remaining: quota?.remaining ?? undefined,
+      limit: quota?.limit ?? undefined,
+    });
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+  logger.info("quota", { detail: decision.reason, free_tier: quota?.isFreeTier ?? undefined });
 
   logger.info("context ready", {
     chunks_to_review: affordable.selected.length,

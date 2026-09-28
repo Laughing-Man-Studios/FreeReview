@@ -262,6 +262,160 @@ function validateConfig(config) {
     }
   }
 }
+function eligibleModels(config) {
+  return config.models.filter((m) => m.enabled).filter((m) => config.privacyMode === "relaxed" || m.privacyEligible).sort((a, b) => a.priority - b.priority);
+}
+function capabilityModeFor(model) {
+  if (model.supportsJsonSchema === true) return "STRUCTURED";
+  if (model.supportsResponseFormat === true) return "JSON_OBJECT";
+  if (model.supportsJsonSchema === false) return "PROMPT_JSON";
+  if (model.supportsResponseFormat === false) return "PROMPT_JSON";
+  return "PROMPT_JSON";
+}
+
+// src/llm/client.ts
+var MODELS_URL = "https://openrouter.ai/api/v1/models";
+var KEY_URL = "https://openrouter.ai/api/v1/key";
+
+// src/llm/catalog.ts
+async function fetchCatalog(options = {}) {
+  const doFetch = options.fetchImpl ?? fetch;
+  try {
+    const response = await doFetch(MODELS_URL, {
+      headers: { Accept: "application/json" }
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    return Array.isArray(body.data) ? body.data : null;
+  } catch {
+    return null;
+  }
+}
+function evaluateModel(model, catalog, required) {
+  if (catalog === null) {
+    return {
+      model: null,
+      exists: true,
+      isFree: true,
+      supportsJsonSchema: model.supportsJsonSchema ?? false,
+      supportsResponseFormat: model.supportsResponseFormat ?? false,
+      contextLength: model.maxContextTokens,
+      problem: null
+    };
+  }
+  const found = catalog.find((entry) => entry.id === model.id);
+  if (found === void 0) {
+    return {
+      model: null,
+      exists: false,
+      isFree: false,
+      supportsJsonSchema: false,
+      supportsResponseFormat: false,
+      contextLength: null,
+      problem: "The model is no longer present in the OpenRouter catalog."
+    };
+  }
+  const promptPrice = found.pricing?.prompt;
+  const completionPrice = found.pricing?.completion;
+  const isFree = promptPrice === "0" && completionPrice === "0";
+  if (!isFree) {
+    return {
+      model: found,
+      exists: true,
+      isFree: false,
+      supportsJsonSchema: false,
+      supportsResponseFormat: false,
+      contextLength: found.context_length ?? null,
+      problem: `The model is listed but not priced at zero (prompt=${promptPrice ?? "?"}, completion=${completionPrice ?? "?"}). A $0 action will not use it.`
+    };
+  }
+  const parameters = new Set(found.supported_parameters ?? []);
+  const supportsJsonSchema = parameters.has("structured_outputs");
+  const supportsResponseFormat = parameters.has("response_format");
+  if (required.mode === "STRUCTURED" && !supportsJsonSchema) {
+    return {
+      model: found,
+      exists: true,
+      isFree: true,
+      supportsJsonSchema: false,
+      supportsResponseFormat,
+      contextLength: found.context_length ?? null,
+      problem: "The model does not advertise structured_outputs, so a strict JSON schema cannot be enforced. It would be selected in json_object mode instead."
+    };
+  }
+  const contextLength = found.context_length ?? null;
+  const needed = required.inputTokens + required.outputTokens;
+  if (contextLength !== null && contextLength < needed) {
+    return {
+      model: found,
+      exists: true,
+      isFree: true,
+      supportsJsonSchema,
+      supportsResponseFormat,
+      contextLength,
+      problem: `The model's context window is ${contextLength} tokens, below the ${needed} this configuration requires.`
+    };
+  }
+  return {
+    model: found,
+    exists: true,
+    isFree: true,
+    supportsJsonSchema,
+    supportsResponseFormat,
+    contextLength,
+    problem: null
+  };
+}
+async function fetchQuota(config, options = {}) {
+  const doFetch = options.fetchImpl ?? fetch;
+  try {
+    const response = await doFetch(KEY_URL, {
+      headers: {
+        Authorization: `Bearer ${config.openrouterApiKey}`,
+        Accept: "application/json"
+      }
+    });
+    if (!response.ok) return null;
+    const body = await response.json();
+    const daily = body.data?.free_model_daily_requests;
+    return {
+      remaining: daily?.remaining ?? null,
+      limit: daily?.limit ?? null,
+      used: daily?.used ?? null,
+      isFreeTier: body.data?.is_free_tier ?? false
+    };
+  } catch {
+    return null;
+  }
+}
+function quotaDecision(quota, reserve, plannedRequests) {
+  if (quota === null) {
+    return { proceed: true, reason: "Quota could not be read; relying on the per-run budget.", diagnostic: null };
+  }
+  if (quota.remaining === null) {
+    return { proceed: true, reason: "Quota remaining unknown; relying on the per-run budget.", diagnostic: null };
+  }
+  const spendable = Math.max(0, quota.remaining - reserve);
+  if (spendable <= 0) {
+    return {
+      proceed: false,
+      reason: `The daily free-model allowance is exhausted (${quota.remaining} remaining of ${quota.limit ?? "?"}, with ${reserve} reserved). It resets at UTC midnight.`,
+      diagnostic: "OPENROUTER_QUOTA_EXHAUSTED"
+    };
+  }
+  if (plannedRequests > spendable) {
+    return {
+      proceed: true,
+      reason: `Only ${spendable} of the ${plannedRequests} planned request(s) fit within the remaining daily allowance (${quota.remaining} of ${quota.limit ?? "?"}, ${reserve} reserved). The review will cover fewer files.`,
+      diagnostic: null
+    };
+  }
+  return {
+    proceed: true,
+    reason: `${quota.remaining} of ${quota.limit ?? "?"} free-model requests remain today.`,
+    diagnostic: null
+  };
+}
 
 // src/diagnostics.ts
 var ACTION_FAILURE_CODES = /* @__PURE__ */ new Set([
@@ -1555,6 +1709,31 @@ async function run(env = process.env) {
     );
     return finish(logger, baseOutputs(), "skipped_early_exit");
   }
+  const catalog = await fetchCatalog();
+  const usableModels = eligibleModels(config).filter((model) => {
+    const mode = capabilityModeFor(model);
+    const entry = evaluateModel(model, catalog, {
+      inputTokens: config.maxInputTokens,
+      outputTokens: config.maxOutputTokens,
+      mode
+    });
+    if (entry.problem === null) return true;
+    logger.debug("model not usable", { model: model.id, reason: entry.problem });
+    return false;
+  });
+  if (usableModels.length === 0) {
+    logger.log(
+      "NO_ELIGIBLE_MODEL",
+      catalog === null ? "No configured model is usable, and the OpenRouter catalog could not be read to confirm why. Check that the configured models are free, present, and support the required capabilities." : "No configured free model satisfies this configuration. Under strict privacy, a model must have a ZDR endpoint with no data collection, which not every free provider offers. Try privacy_mode=relaxed or a different model.",
+      { configured: config.models.length, catalog_available: catalog !== null }
+    );
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+  logger.info("eligible models", {
+    count: usableModels.length,
+    primary: usableModels[0]?.id,
+    catalog: catalog === null ? "unavailable" : "verified"
+  });
   const sizeGate = checkChangedLines({
     totalChangedLines,
     maxChangedLines: config.maxChangedLines,
@@ -1660,6 +1839,16 @@ async function run(env = process.env) {
       `This pull request produced ${chunks.length} chunks but only ${affordable.selected.length} fit within max_requests_per_run (${config.maxRequestsPerRun}). ${affordable.dropped} chunk(s) were not reviewed.`
     );
   }
+  const quota = await fetchQuota(config);
+  const decision = quotaDecision(quota, config.dailyReserve, affordable.selected.length);
+  if (!decision.proceed) {
+    logger.log("OPENROUTER_QUOTA_EXHAUSTED", decision.reason, {
+      remaining: quota?.remaining ?? void 0,
+      limit: quota?.limit ?? void 0
+    });
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+  logger.info("quota", { detail: decision.reason, free_tier: quota?.isFreeTier ?? void 0 });
   logger.info("context ready", {
     chunks_to_review: affordable.selected.length,
     dropped: affordable.dropped,
