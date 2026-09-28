@@ -67,15 +67,8 @@ export interface DiffFile {
 export interface AnchorUnit {
   readonly lineNumber: number;
   readonly kind: LineKind;
-}
-
-/** Per-side searchable view of one file's diff. */
-export interface FileIndex {
-  readonly path: string;
-  /** Context + removed lines, with their LEFT line numbers. */
-  readonly left: readonly AnchorUnit[];
-  /** Context + added lines, with their RIGHT line numbers. */
-  readonly right: readonly AnchorUnit[];
+  /** Whether a review comment can be anchored to this line. */
+  readonly isCommentable: boolean;
 }
 
 export type AnchorRejectionCode =
