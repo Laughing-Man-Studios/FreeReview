@@ -34,6 +34,7 @@ const HEAD_SHA = "a".repeat(40);
 const BASE_SHA = "b".repeat(40);
 const PR_PATH = `${API}/repos/${OWNER}/${REPO}/pulls/${PR}`;
 const FILES_PATH = `${PR_PATH}/files`;
+const REVIEWS_PATH_ABS = `${PR_PATH}/reviews`;
 
 const server = setupServer();
 
@@ -50,6 +51,7 @@ beforeAll(() => {
 afterEach(() => {
   server.resetHandlers();
   chatCalls = 0;
+  published.length = 0;
 });
 
 afterAll(() => server.close());
@@ -210,10 +212,39 @@ function healthy(): void {
   );
 }
 
-/** A healthy upstream plus a chat endpoint that returns one finding. */
+/**
+ * Every review payload published, for asserting the publication contract.
+ *
+ * Recorded inside the handler, not via a `request:start` hook: that hook's body
+ * parse is a promise, so it resolves after `afterEach` has cleared the array and
+ * the late push pollutes the next test.
+ */
+const published: Record<string, unknown>[] = [];
+
+/** A reviews handler that records what it received, then accepts it. */
+function acceptReview(): void {
+  server.use(
+    http.post(REVIEWS_PATH_ABS, async ({ request }) => {
+      published.push((await request.clone().json()) as Record<string, unknown>);
+      return okReviewPost();
+    }),
+  );
+}
+
+/** A healthy upstream plus a chat endpoint and an accepting reviews endpoint. */
 function reviewable(): void {
   healthy();
   server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+  acceptReview();
+}
+
+/** Every review payload published, for asserting the publication contract. */
+
+function okReviewPost() {
+  return HttpResponse.json({
+    id: 7,
+    html_url: "https://github.com/acme/widgets/pull/42#pullrequestreview-7",
+  });
 }
 
 function okChat(content = '{"findings":[]}') {
@@ -265,6 +296,7 @@ describe("the run reaches the review stage", () => {
       ),
     );
     server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+  server.use(http.post(REVIEWS_PATH_ABS, () => okReviewPost()));
 
     const outputs = await run(env());
 
@@ -294,7 +326,9 @@ describe("the run reaches the review stage", () => {
             findings: [
               {
                 path: "src/loop.ts",
-                buggyCodeQuote: "return values.length - 1;",
+                // A whole added line. A mid-line fragment cannot be located and
+                // is correctly reported as unplaced rather than published.
+                buggyCodeQuote: "  return values.length - 1;",
                 explanation: "Drops the last element, so the total is always one short.",
                 severity: "warning",
                 suggestedCode: null,
@@ -305,9 +339,53 @@ describe("the run reaches the review stage", () => {
       ),
     );
 
+    acceptReview();
+
     const outputs = await run(env());
 
     expect(outputs.findings_count).toBe("1");
+    expect(outputs.unanchored_count).toBe("0");
+    expect(outputs.review_url).toContain("pullrequestreview-7");
+  });
+
+  it("reports a finding it cannot place, without publishing it inline", async () => {
+    // The important half of the contract: a quote that cannot be located ends
+    // up in the summary's "not placed" section, never attached to a guessed
+    // line.
+    healthy();
+    server.use(
+      http.post(CHAT_COMPLETIONS_URL, () =>
+        okChat(
+          JSON.stringify({
+            findings: [
+              {
+                path: "src/loop.ts",
+                buggyCodeQuote: "values.length - 1",
+                explanation: "A mid-line fragment, which the resolver cannot locate at all.",
+                severity: "warning",
+                suggestedCode: null,
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    const bodies: Record<string, unknown>[] = [];
+    server.use(
+      http.post(REVIEWS_PATH_ABS, async ({ request }) => {
+        bodies.push((await request.clone().json()) as Record<string, unknown>);
+        return okReviewPost();
+      }),
+    );
+
+    const outputs = await run(env());
+
+    expect(outputs.findings_count).toBe("0");
+    expect(outputs.unanchored_count).toBe("1");
+    const review = bodies[0] as { comments: unknown[]; body: string };
+    expect(review.comments).toEqual([]);
+    expect(review.body).toContain("Not placed on a line");
   });
 
   it("spends nothing on a PR that produced no reviewable chunks", async () => {
@@ -382,6 +460,7 @@ describe("the model must be usable before anything is sent", () => {
       ),
     );
     server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+  server.use(http.post(REVIEWS_PATH_ABS, () => okReviewPost()));
 
     const outputs = await run(env());
 
@@ -439,6 +518,7 @@ describe("the daily reserve is respected at the pipeline level", () => {
     server.use(http.get(MODELS_URL, () => HttpResponse.json(catalogPayload())));
     server.use(http.get(KEY_URL, () => HttpResponse.error()));
     server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+  server.use(http.post(REVIEWS_PATH_ABS, () => okReviewPost()));
 
     await run(env());
 
@@ -512,6 +592,92 @@ describe("the gate order is preserved", () => {
     await run(env());
 
     expect(urls.some((u) => u.endsWith("/files"))).toBe(false);
+  });
+});
+
+describe("a pull request that moves mid-run", () => {
+  // The failure this prevents: findings anchored to lines that have since
+  // shifted, published as though they described the current code. GitHub
+  // accepts them, resolving `line` against the new head — so a developer whose
+  // push got "reviewed" sees a confident claim about code nobody wrote.
+  it("discards everything and publishes nothing when the head SHA moves", async () => {
+    healthy();
+    server.use(
+      http.post(CHAT_COMPLETIONS_URL, () =>
+        okChat(
+          JSON.stringify({
+            findings: [
+              {
+                path: "src/loop.ts",
+                buggyCodeQuote: "  return values.length - 1;",
+                explanation: "Drops the last element, so the total is always one short.",
+                severity: "warning",
+                suggestedCode: null,
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+    // The re-read before publication returns a different head.
+    let reads = 0;
+    server.use(
+      http.get(PR_PATH, () => {
+        reads += 1;
+        return HttpResponse.json(prPayload(reads === 1 ? {} : { head: { ...prPayload().head, sha: "c".repeat(40) } }));
+      }),
+    );
+    acceptReview();
+
+    const outputs = await run(env());
+
+    expect(outputs.status).toBe("skipped_stale");
+    // Nothing was published: no review call was made at all.
+    expect(published).toHaveLength(0);
+  });
+
+  it("does not publish when the head cannot be re-read", async () => {
+    // "Unverifiable" is not "fine". Publishing on a network blip chooses the
+    // unsafe branch, so the run skips and says why.
+    healthy();
+    server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+    let reads = 0;
+    server.use(
+      http.get(PR_PATH, () => {
+        reads += 1;
+        if (reads === 1) return HttpResponse.json(prPayload());
+        return HttpResponse.json({ message: "Server Error" }, { status: 500 });
+      }),
+    );
+    acceptReview();
+
+    const outputs = await run(env());
+
+    expect(published).toHaveLength(0);
+    expect(outputs.status).not.toBe("reviewed");
+  });
+});
+
+describe("the publication contract", () => {
+  it("never sends a merge-blocking event", async () => {
+    // Belt and braces at the pipeline level: the publisher test asserts the
+    // payload, and this asserts the run that builds it.
+    reviewable();
+    acceptReview();
+
+    await run(env());
+
+    expect(published).toHaveLength(1);
+    expect(published[0]?.["event"]).toBe("COMMENT");
+  });
+
+  it("anchors the review to the commit it actually reviewed", async () => {
+    reviewable();
+    acceptReview();
+
+    await run(env());
+
+    expect(published[0]?.["commit_id"]).toBe(HEAD_SHA);
   });
 });
 

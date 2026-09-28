@@ -20696,6 +20696,12 @@ does not match one of the headers shown cannot be placed and will be discarded.
 \`buggyCodeQuote\` must be copied VERBATIM from the diff, character for character,
 with no line numbers and no leading \`+\` or \`-\` markers. This text is the only
 thing used to position your comment, so an approximate quote will be discarded.
+
+A quote must START at the beginning of a line and END at the end of a line. A
+fragment from the middle of a line cannot be located and will be discarded. For
+a multi-line finding, quote the consecutive whole lines including the newlines
+between them.
+
 Quote the smallest span that demonstrates the defect, not the whole function.
 
 \`explanation\` must state the specific failure mode: what breaks, under what
@@ -21790,121 +21796,447 @@ function parseResponse(content, parsed) {
   return parseFindingsResponse(content, parsed);
 }
 
-// src/diagnostics.ts
-var ACTION_FAILURE_CODES = /* @__PURE__ */ new Set([
-  "CONFIG_INVALID",
-  "MISSING_CREDENTIALS",
-  "INVALID_GITHUB_CONTEXT",
-  "DIFF_PARSE_FAILED",
-  "OPENROUTER_AUTH_FAILED",
-  "INTERNAL_ERROR"
-]);
-function severityOf(code) {
-  return ACTION_FAILURE_CODES.has(code) ? "failure" : "expected";
+// src/diff/index.ts
+function buildFileIndex(file2) {
+  const segments = [];
+  file2.hunks.forEach((hunk, hunkIndex) => {
+    const left = [];
+    const right = [];
+    for (const line of hunk.lines) {
+      if (line.oldLine !== null) {
+        left.push({
+          lineNumber: line.oldLine,
+          kind: line.kind,
+          text: line.text,
+          isCommentable: line.isCommentable
+        });
+      }
+      if (line.newLine !== null) {
+        right.push({
+          lineNumber: line.newLine,
+          kind: line.kind,
+          text: line.text,
+          isCommentable: line.isCommentable
+        });
+      }
+    }
+    if (left.length > 0) {
+      segments.push({ filePath: file2.path, side: "LEFT", hunkIndex, lines: left });
+    }
+    if (right.length > 0) {
+      segments.push({ filePath: file2.path, side: "RIGHT", hunkIndex, lines: right });
+    }
+  });
+  return { path: file2.path, segments };
 }
-function diagnostic(code, message, context) {
-  return { code, severity: severityOf(code), message, ...context ? { context } : {} };
-}
-function escapeForLog(value) {
-  return value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
-}
-function formatDiagnostic(d) {
-  const parts = [`[${d.code}]`, d.message];
-  if (d.context) {
-    const rendered = Object.entries(d.context).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${String(v)}`);
-    if (rendered.length > 0) parts.push(`(${rendered.join(" ")})`);
+function buildIndex(files) {
+  const index = /* @__PURE__ */ new Map();
+  for (const file2 of files) {
+    if (!index.has(file2.path)) index.set(file2.path, buildFileIndex(file2));
   }
-  return parts.join(" ");
+  return index;
 }
-var SECRET_PATTERNS = [
-  // OpenAI / OpenRouter style
-  /sk-[A-Za-z0-9_-]{16,}/g,
-  // GitHub tokens
-  /gh[pousr]_[A-Za-z0-9]{16,}/g,
-  // AWS access key ids
-  /AKIA[0-9A-Z]{16}/g,
-  // Google API keys
-  /AIza[0-9A-Za-z_-]{30,}/g,
-  // Slack
-  /xox[abprs]-[A-Za-z0-9-]{10,}/g,
-  // GitLab
-  /glpat-[A-Za-z0-9_-]{16,}/g
+
+// src/anchor/normalize.ts
+var stripCR = (line) => line.replace(/\r$/, "");
+var rstrip = (line) => line.replace(/[ \t]+$/, "");
+var stripLeading = (line) => line.replace(/^[ \t]+/, "");
+var collapseInner = (line) => line.replace(/[ \t]+/g, " ");
+var RUNGS = [
+  /* L0 */
+  [],
+  /* L1 */
+  [stripCR],
+  /* L2 */
+  [stripCR, rstrip],
+  /* L3 */
+  [stripCR, rstrip, stripLeading],
+  /* L4 */
+  [stripCR, rstrip, stripLeading, collapseInner]
 ];
-function redactSecrets(value) {
-  let out = value;
-  for (const pattern of SECRET_PATTERNS) {
-    out = out.replace(pattern, "[REDACTED]");
-  }
+var RUNG_LABELS = [
+  "exact",
+  "crlf",
+  "trailing-whitespace",
+  "reindent",
+  "collapsed-whitespace"
+];
+function transformLine(line, rung) {
+  const transforms = RUNGS[clampRung(rung)] ?? [];
+  let out = line;
+  for (const transform2 of transforms) out = transform2(out);
   return out;
 }
-function renderValue(value) {
-  if (typeof value === "string") return value;
-  if (typeof value === "object" && value !== null) {
-    return JSON.stringify(value) ?? "[unserialisable]";
+function transformLines(lines, rung) {
+  return lines.map((line) => transformLine(line, rung));
+}
+function normaliseQuote(quote, rung) {
+  const lines = quote.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return transformLines(lines, rung);
+}
+function clampRung(rung) {
+  if (!Number.isInteger(rung) || rung < 0) return 0;
+  if (rung >= RUNGS.length) return RUNGS.length - 1;
+  return rung;
+}
+
+// src/anchor/resolve.ts
+var MIN_QUOTE_LENGTH = 3;
+var MAX_QUOTE_LENGTH2 = 2e3;
+function resolveAnchor(input2) {
+  const { path, quote, index, prFilePaths } = input2;
+  const normalisedPath = path.normalize("NFC");
+  if (!prFilePaths.has(normalisedPath)) {
+    return reject("PATH_NOT_IN_PR", 0, 0, "The reported path is not one of this pull request's files.");
   }
-  if (typeof value === "number" || typeof value === "boolean") return String(value);
-  if (typeof value === "bigint") return value.toString();
-  return "";
-}
-function sanitize(fields) {
-  if (!fields) return {};
-  const out = {};
-  for (const [key, value] of Object.entries(fields)) {
-    if (value === void 0) continue;
-    out[key] = redactSecrets(renderValue(value));
+  if (index.path !== normalisedPath) {
+    return reject("PATH_NOT_IN_PR", 0, 0, "No diff index exists for the reported path.");
   }
-  return out;
+  if (quote.trim().length === 0) {
+    return reject("ANCHOR_QUOTE_MALFORMED", 0, 0, "The quote is empty.");
+  }
+  if (quote.trim().length < MIN_QUOTE_LENGTH) {
+    return reject(
+      "ANCHOR_QUOTE_MALFORMED",
+      0,
+      0,
+      `The quote is only ${quote.trim().length} character(s); at least ${MIN_QUOTE_LENGTH} are required.`
+    );
+  }
+  if (quote.length > MAX_QUOTE_LENGTH2) {
+    return reject(
+      "ANCHOR_QUOTE_MALFORMED",
+      0,
+      0,
+      `The quote is ${quote.length} characters; the limit is ${MAX_QUOTE_LENGTH2}.`
+    );
+  }
+  const quoteLineCount = countQuoteLines(quote);
+  if (quoteLineCount > 20) {
+    return reject(
+      "ANCHOR_QUOTE_MALFORMED",
+      0,
+      0,
+      `The quote spans ${quoteLineCount} lines; the limit is 20.`
+    );
+  }
+  let deepestRungReached = 0;
+  for (let rung = 0; rung < RUNG_LABELS.length; rung += 1) {
+    const needle = normaliseQuote(quote, rung);
+    if (needle.length === 0 || needle.every((line) => line.length === 0)) {
+      deepestRungReached = rung;
+      break;
+    }
+    const matches = [];
+    for (const segment of index.segments) {
+      const haystack = transformLines(
+        segment.lines.map((line) => line.text),
+        rung
+      );
+      collectMatches(needle, haystack, (startIndex) => {
+        matches.push({ segment, side: segment.side, startIndex, length: needle.length, rung });
+      });
+    }
+    if (matches.length === 0) {
+      deepestRungReached = rung;
+      continue;
+    }
+    const distinct = collapseByLocation(matches);
+    if (distinct.length > 1) {
+      return reject(
+        "ANCHOR_AMBIGUOUS",
+        rung,
+        distinct.length,
+        `The quote matches ${distinct.length} locations in this file (${RUNG_LABELS[rung]} match). Ambiguous anchors are declined rather than guessed.`
+      );
+    }
+    return buildAnchor(distinct[0]);
+  }
+  return reject(
+    "ANCHOR_NOT_FOUND",
+    deepestRungReached,
+    0,
+    "The quote does not appear in the diff, even after whitespace normalisation."
+  );
 }
-function formatLine(level, message, fields) {
-  const safe = redactSecrets(message);
-  const extras = sanitize(fields);
-  const rendered = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join(" ");
-  return rendered ? `${level} ${safe} ${rendered}` : `${level} ${safe}`;
+function buildAnchor(match) {
+  const { segment, side, startIndex, length, rung } = match;
+  const endIndex = startIndex + length - 1;
+  const first = segment.lines[startIndex];
+  const last = segment.lines[endIndex];
+  if (first === void 0 || last === void 0) {
+    return reject("ANCHOR_NOT_FOUND", rung, 1, "Match resolved to no line.");
+  }
+  const span = segment.lines.slice(startIndex, endIndex + 1);
+  const hasChange = span.some((line) => line.kind !== "context");
+  if (!hasChange && side === "RIGHT") {
+    return reject(
+      "ANCHOR_CONTEXT_ONLY",
+      rung,
+      1,
+      "The quote matches only unchanged context lines. Findings must point at added or removed code."
+    );
+  }
+  const anchor2 = {
+    path: segment.filePath,
+    line: last.lineNumber,
+    side,
+    ...length > 1 && first.lineNumber !== last.lineNumber ? { startLine: first.lineNumber, startSide: side } : {},
+    rung
+  };
+  return { ok: true, anchor: anchor2 };
 }
-function firstLine(value) {
-  const line = value.split("\n", 1)[0] ?? value;
-  return line.length > 400 ? `${line.slice(0, 400)}\u2026` : line;
+function collectMatches(needle, haystack, onMatch) {
+  if (needle.length === 0 || needle.length > haystack.length) return;
+  for (let start = 0; start + needle.length <= haystack.length; start += 1) {
+    let matched = true;
+    for (let offset = 0; offset < needle.length; offset += 1) {
+      if (haystack[start + offset] !== needle[offset]) {
+        matched = false;
+        break;
+      }
+    }
+    if (matched) onMatch(start);
+  }
 }
-function createLogger(opts) {
-  const debugEnabled = opts?.debug ?? process.env["RUNNER_DEBUG"] === "1";
-  const diagnostics = [];
-  const emit = (level, command, message, fields) => {
-    const line = formatLine(level, message, fields);
-    if (command) {
-      process.stdout.write(`${command}::${escapeForLog(line)}
-`);
-    } else {
-      process.stdout.write(`${escapeForLog(line)}
-`);
+function collapseByLocation(matches) {
+  const byLocation = /* @__PURE__ */ new Map();
+  for (const match of matches) {
+    const key = `${match.segment.hunkIndex}:${match.startIndex}:${match.length}`;
+    const existing = byLocation.get(key);
+    if (existing === void 0 || existing.side === "LEFT" && match.side === "RIGHT") {
+      byLocation.set(key, match);
+    }
+  }
+  return [...byLocation.values()];
+}
+function countQuoteLines(quote) {
+  const lines = quote.split("\n");
+  if (lines.length > 1 && lines[lines.length - 1] === "") lines.pop();
+  return lines.length;
+}
+function reject(code, rung, candidateCount, detail) {
+  return { ok: false, code, rung, candidateCount, detail };
+}
+function anchorKeyFor(path, quote) {
+  return `${path}\0${quote}`;
+}
+function resolveAnchors(inputs, index, prFilePaths) {
+  const anchors = /* @__PURE__ */ new Map();
+  const order = [];
+  for (const input2 of inputs) {
+    const key = anchorKeyFor(input2.path, input2.quote);
+    if (anchors.has(key)) continue;
+    order.push(key);
+    const fileIndex = index.get(input2.path.normalize("NFC"));
+    anchors.set(
+      key,
+      fileIndex === void 0 ? {
+        ok: false,
+        code: "PATH_NOT_IN_PR",
+        rung: 0,
+        candidateCount: 0,
+        detail: "No diff index exists for the reported path."
+      } : resolveAnchor({ path: input2.path, quote: input2.quote, index: fileIndex, prFilePaths })
+    );
+  }
+  return { anchors, order };
+}
+
+// src/pipeline/validate.ts
+var MIN_EXPLANATION_LENGTH = 20;
+var MAX_SUGGESTION_SPAN_LINES = 1;
+var VAGUE_PREFIXES = ["looks fine", "looks good", "fine", "ok", "okay", "good", "nice"];
+function isThin(explanation) {
+  const trimmed = explanation.trim().toLowerCase();
+  if (trimmed.length < MIN_EXPLANATION_LENGTH) return true;
+  if (VAGUE_PREFIXES.some((prefix) => trimmed === prefix || trimmed === `${prefix}.`)) return true;
+  return false;
+}
+function anchoredLines(anchor2, index) {
+  const fileIndex = index.get(anchor2.path.normalize("NFC"));
+  if (fileIndex === void 0) return null;
+  const start = anchor2.startLine ?? anchor2.line;
+  for (const segment of fileIndex.segments) {
+    if (segment.side !== anchor2.side) continue;
+    const collected = segment.lines.filter(
+      (line) => line.lineNumber >= start && line.lineNumber <= anchor2.line
+    );
+    if (collected.length === 0) continue;
+    if (collected.length !== anchor2.line - start + 1) continue;
+    if (collected[0]?.lineNumber !== start) continue;
+    if (collected[collected.length - 1]?.lineNumber !== anchor2.line) continue;
+    return collected;
+  }
+  return null;
+}
+function anchoredText(anchor2, index) {
+  const lines = anchoredLines(anchor2, index);
+  return lines === null ? null : lines.map((line) => line.text).join("\n");
+}
+function quoteDescribesText(quote, text) {
+  const normalise = (value) => value.replace(/\s+/g, " ").trim();
+  const q = normalise(quote);
+  const t = normalise(text);
+  return t.includes(q) || q.includes(t);
+}
+function validateFinding(candidate, prFilePaths, index) {
+  const { finding, anchor: anchor2 } = candidate;
+  if (finding.path.normalize("NFC") !== anchor2.path.normalize("NFC")) {
+    return {
+      ok: false,
+      rejection: {
+        code: "PATH_NOT_IN_PR",
+        path: finding.path,
+        severity: finding.severity,
+        detail: "The finding's path and the location it resolved to name different files, so the quoted code and the reported file disagree."
+      }
+    };
+  }
+  if (!prFilePaths.has(finding.path)) {
+    return {
+      ok: false,
+      rejection: {
+        code: "PATH_NOT_IN_PR",
+        path: finding.path,
+        severity: finding.severity,
+        detail: "The finding names a file that is not part of this pull request, so it cannot be placed on a line."
+      }
+    };
+  }
+  const text = anchoredText(anchor2, index);
+  if (text === null) {
+    return {
+      ok: false,
+      rejection: {
+        code: "ANCHOR_TEXT_MISMATCH",
+        path: finding.path,
+        severity: finding.severity,
+        detail: "The anchor does not correspond to any line in the diff."
+      }
+    };
+  }
+  if (!quoteDescribesText(finding.buggyCodeQuote, text)) {
+    return {
+      ok: false,
+      rejection: {
+        code: "ANCHOR_TEXT_MISMATCH",
+        path: finding.path,
+        severity: finding.severity,
+        detail: "The resolved location does not contain the quoted text, so the finding would be attached to code the model did not quote."
+      }
+    };
+  }
+  if (isThin(finding.explanation)) {
+    return {
+      ok: false,
+      rejection: {
+        code: "EXPLANATION_TOO_THIN",
+        path: finding.path,
+        severity: finding.severity,
+        detail: "The explanation does not describe a specific failure mode, so the finding would be noise in the review."
+      }
+    };
+  }
+  if (finding.suggestedCode !== null) {
+    const lines = anchoredLines(anchor2, index) ?? [];
+    if (lines.length > MAX_SUGGESTION_SPAN_LINES) {
+      return {
+        ok: false,
+        rejection: {
+          code: "SUGGESTION_SPAN_TOO_SMALL",
+          path: finding.path,
+          severity: finding.severity,
+          detail: `A suggestion is anchored to a ${lines.length}-line range. Applying it would replace lines the model did not propose, so the suggestion was dropped. The finding is still reported.`
+        }
+      };
+    }
+  }
+  let suggestion = finding.suggestedCode;
+  if (suggestion !== null && /`{3,}/.test(suggestion)) {
+    suggestion = null;
+  }
+  return {
+    ok: true,
+    value: {
+      path: finding.path,
+      explanation: finding.explanation,
+      severity: finding.severity,
+      suggestedCode: suggestion,
+      anchor: anchor2,
+      anchoredText: text
     }
   };
-  const logger = {
-    info: (message, fields) => emit("info", "", message, fields),
-    warn: (message, fields) => emit("warn", "", message, fields),
-    error: (message, fields) => emit("error", "::error", firstLine(message), fields),
-    annotation: (message, fields) => emit("warning", "::warning", firstLine(message), fields),
-    debug: (message, fields) => {
-      if (debugEnabled) emit("debug", "", message, fields);
-    },
-    record: (d) => {
-      diagnostics.push(d);
-      emit(d.severity === "failure" ? "error" : "warning", "", formatDiagnostic(d));
-    },
-    log: (code, message, context) => {
-      const d = diagnostic(code, message, context);
-      logger.record(d);
-      return d;
-    },
-    get diagnostics() {
-      return diagnostics;
-    },
-    counts: () => {
-      const out = {};
-      for (const d of diagnostics) out[d.code] = (out[d.code] ?? 0) + 1;
-      return out;
+}
+function validateFindings(candidates, prFilePaths, index) {
+  const accepted = [];
+  const rejected = [];
+  for (const candidate of candidates) {
+    const result = validateFinding(candidate, prFilePaths, index);
+    if (result.ok) accepted.push(result.value);
+    else rejected.push(result.rejection);
+  }
+  return { accepted, rejected };
+}
+
+// src/pipeline/dedupe.ts
+function anchorKey(finding) {
+  const { anchor: anchor2 } = finding;
+  const start = anchor2.startLine ?? anchor2.line;
+  return [anchor2.path, anchor2.side, start, anchor2.line].join(":");
+}
+var SEVERITY_RANK = {
+  critical: 3,
+  warning: 2,
+  info: 1
+};
+function isDuplicate(a, b) {
+  const left = a.explanation.toLowerCase().replace(/\s+/g, " ").trim();
+  const right = b.explanation.toLowerCase().replace(/\s+/g, " ").trim();
+  if (left === right) return true;
+  const words = (text) => new Set(
+    text.split(/[^a-z0-9]+/).filter((w) => w.length > 2)
+  );
+  const leftWords = words(left);
+  const rightWords = words(right);
+  if (leftWords.size === 0 || rightWords.size === 0) return false;
+  let shared = 0;
+  for (const word of leftWords) {
+    if (rightWords.has(word)) shared += 1;
+  }
+  return shared / (leftWords.size + rightWords.size - shared) >= 0.7;
+}
+function dedupe(findings) {
+  const kept = [];
+  const indexByKey = /* @__PURE__ */ new Map();
+  const merges = [];
+  for (const finding of findings) {
+    const key = anchorKey(finding);
+    const at = indexByKey.get(key);
+    if (at === void 0) {
+      indexByKey.set(key, kept.length);
+      kept.push(finding);
+      continue;
     }
-  };
-  return logger;
+    const existing = kept[at];
+    if (existing === void 0) continue;
+    if (!isDuplicate(existing, finding)) {
+      indexByKey.delete(key);
+      kept.push(finding);
+      continue;
+    }
+    merges.push({ path: finding.path, line: finding.anchor.line, keptSeverity: existing.severity });
+    if (SEVERITY_RANK[finding.severity] > SEVERITY_RANK[existing.severity]) {
+      kept[at] = finding;
+      merges[merges.length - 1] = {
+        path: finding.path,
+        line: finding.anchor.line,
+        keptSeverity: finding.severity
+      };
+    }
+  }
+  return { kept, dropped: findings.length - kept.length, merges };
 }
 
 // src/github/client.ts
@@ -22065,6 +22397,400 @@ async function safeJson(response) {
     return null;
   }
 }
+
+// src/github/pr.ts
+function prPath(owner, repo, pullNumber) {
+  return `/repos/${owner}/${repo}/pulls/${pullNumber}`;
+}
+async function getPullRequest(client, owner, repo, pullNumber) {
+  return client.get(prPath(owner, repo, pullNumber));
+}
+async function listPullRequestFiles(client, owner, repo, pullNumber) {
+  return client.getAllPages(`${prPath(owner, repo, pullNumber)}/files`);
+}
+
+// src/pipeline/stale.ts
+async function confirmHeadUnchanged(client, params) {
+  let currentHeadSha;
+  try {
+    const pr = await getPullRequest(client, params.owner, params.repo, params.pullNumber);
+    currentHeadSha = pr.head.sha;
+  } catch (error62) {
+    if (error62 instanceof GithubError) {
+      return {
+        ok: false,
+        reason: "unverifiable",
+        detail: `Could not re-read the pull request to confirm it had not changed: ${error62.message}`
+      };
+    }
+    throw error62;
+  }
+  if (currentHeadSha !== params.expectedHeadSha) {
+    return {
+      ok: false,
+      reason: "stale",
+      detail: "The pull request gained a new commit while this review was running. The findings were computed against the previous version and have been discarded rather than published against lines that have since moved. The new commit will trigger a fresh review."
+    };
+  }
+  return { ok: true, currentHeadSha };
+}
+
+// src/output/comment.ts
+var MAX_QUOTE_LENGTH3 = 1200;
+var MAX_QUOTE_LINES = 12;
+var SEVERITY_LABELS = {
+  critical: "Critical",
+  warning: "Warning",
+  info: "Note"
+};
+function safeFence(content) {
+  let longest = 0;
+  for (const match of content.matchAll(/`+/g)) {
+    longest = Math.max(longest, match[0].length);
+  }
+  return "`".repeat(Math.max(3, longest + 1));
+}
+function neutraliseProse(text) {
+  return text.replace(/`/g, "\\`").replace(/([*_])/g, "\\$1").replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+}
+function renderQuote(quote) {
+  const truncated = quote.length > MAX_QUOTE_LENGTH3;
+  const body = truncated ? `${quote.slice(0, MAX_QUOTE_LENGTH3)}
+\u2026` : quote;
+  const lines = body.split("\n");
+  const shown = lines.slice(0, MAX_QUOTE_LINES);
+  const elided = lines.length - shown.length;
+  const text = elided > 0 ? `${shown.join("\n")}
+\u2026 ${elided} more line(s)` : shown.join("\n");
+  const fence = safeFence(text);
+  return `${fence}
+${text}
+${fence}`;
+}
+function renderSuggestion(suggestedCode) {
+  return `\`\`\`suggestion
+${suggestedCode}
+\`\`\``;
+}
+function renderComment(finding) {
+  const parts = [];
+  parts.push(`**${SEVERITY_LABELS[finding.severity]}** \u2014 generated by FreeReview.`, "");
+  parts.push(neutraliseProse(finding.explanation.trim()), "");
+  parts.push(renderQuote(finding.anchoredText));
+  if (finding.suggestedCode !== null) {
+    parts.push("", renderSuggestion(finding.suggestedCode));
+  }
+  return parts.join("\n");
+}
+function renderSummary(input2) {
+  const lines = [];
+  const critical = input2.findings.filter((f) => f.severity === "critical").length;
+  const warning = input2.findings.filter((f) => f.severity === "warning").length;
+  const info = input2.findings.filter((f) => f.severity === "info").length;
+  lines.push("## FreeReview", "");
+  if (input2.findings.length === 0 && input2.unanchored.length === 0) {
+    lines.push(
+      `Reviewed ${input2.filesReviewed} file(s) and found nothing material. That is a result, not a guarantee \u2014 the review covers the changed lines only, and free models miss real defects.`
+    );
+  } else {
+    const parts = [];
+    if (critical > 0) parts.push(`**${critical} critical**`);
+    if (warning > 0) parts.push(`${warning} warning`);
+    if (info > 0) parts.push(`${info} note`);
+    lines.push(`Found ${parts.join(", ")} across ${input2.filesReviewed} file(s).`);
+  }
+  lines.push("");
+  lines.push(
+    `<sub>Advisory only. Generated by a free-tier language model, which can be wrong. This review does not block merging and nothing here was checked by a human. Model: \`${input2.modelUsed || "none"}\` \xB7 ${input2.requestsUsed} request(s) \xB7 prompt \`${input2.promptVersion}\`.</sub>`
+  );
+  if (input2.privacyMode === "relaxed") {
+    lines.push("");
+    lines.push(
+      "> [!WARNING]",
+      "> **This review was produced with `privacy_mode: relaxed`.** The diff was sent without zero-data-retention enforcement, so a provider may have retained the code. Do not use this mode for confidential source."
+    );
+  }
+  if (input2.unanchored.length > 0) {
+    lines.push("", "### Not placed on a line", "");
+    lines.push(
+      "These findings could not be resolved to exactly one line, so they have no inline comment:",
+      ""
+    );
+    for (const item of input2.unanchored) {
+      lines.push(
+        `- **${SEVERITY_LABELS[item.severity]}** \`${item.path}\` \u2014 ${neutraliseProse(item.explanation.trim())}`
+      );
+    }
+  }
+  if (input2.rejections.length > 0) {
+    lines.push("", "### Discarded", "");
+    lines.push(
+      `${input2.rejections.length} finding(s) were discarded before publication:`,
+      ""
+    );
+    for (const item of input2.rejections) {
+      lines.push(`- \`${item.path}\` \u2014 ${neutraliseProse(item.detail.trim())}`);
+    }
+  }
+  if (input2.filesReviewed < input2.filesInPr) {
+    lines.push(
+      "",
+      `<sub>Reviewed ${input2.filesReviewed} of ${input2.filesInPr} changed file(s); the rest were filtered as non-reviewable (generated, vendored, lockfiles, or assets).</sub>`
+    );
+  }
+  return lines.join("\n");
+}
+
+// src/github/publish.ts
+var REVIEWS_PATH = "/repos/{owner}/{repo}/pulls/{number}/reviews";
+function buildReviewPayload(input2, comments) {
+  return {
+    // COMMENT is the only event this action may ever send. There is no code path
+    // that produces APPROVE or REQUEST_CHANGES.
+    commit_id: input2.commitId,
+    body: input2.body,
+    event: "COMMENT",
+    comments: comments.map((c) => ({
+      path: c.path,
+      body: c.body,
+      line: c.line,
+      side: c.side,
+      ...c.startLine !== void 0 ? { start_line: c.startLine, start_side: c.startSide ?? c.side } : {}
+    }))
+  };
+}
+async function postReview(client, input2, comments) {
+  const path = REVIEWS_PATH.replace("{owner}", input2.owner).replace("{repo}", input2.repo).replace("{number}", String(input2.pullNumber));
+  const response = await client.post(path, buildReviewPayload(input2, comments));
+  return response;
+}
+var MAX_PUBLISH_ATTEMPTS = 24;
+async function publishSet(client, input2, comments, state, lastReview) {
+  if (comments.length === 0) {
+    return { ok: true, reviewId: lastReview.id, reviewUrl: lastReview.url, published: [], dropped: [], detail: null };
+  }
+  if (state.attempts >= MAX_PUBLISH_ATTEMPTS) {
+    state.dropped.push(...comments);
+    state.detail = `Stopped isolating rejected comments after ${MAX_PUBLISH_ATTEMPTS} attempts.`;
+    return { ok: true, reviewId: lastReview.id, reviewUrl: lastReview.url, published: [], dropped: [], detail: state.detail };
+  }
+  state.attempts += 1;
+  try {
+    const review = await postReview(client, input2, comments);
+    state.published.push(...comments);
+    return {
+      ok: true,
+      reviewId: review.id ?? null,
+      reviewUrl: review.html_url ?? null,
+      published: comments,
+      dropped: [],
+      detail: null
+    };
+  } catch (error62) {
+    if (!(error62 instanceof GithubError)) throw error62;
+    if (error62.status !== 422 || comments.length <= 1) {
+      if (comments.length === 1) {
+        state.dropped.push(comments[0]);
+        state.detail = `GitHub rejected ${state.dropped.length} inline comment(s); the rest are published.`;
+        return { ok: true, reviewId: lastReview.id, reviewUrl: lastReview.url, published: [], dropped: comments, detail: state.detail };
+      }
+      return {
+        ok: false,
+        reviewId: lastReview.id,
+        reviewUrl: lastReview.url,
+        published: [],
+        dropped: comments,
+        detail: `GitHub rejected the review: ${error62.message}`
+      };
+    }
+    const half = Math.floor(comments.length / 2);
+    const first = await publishSet(client, input2, comments.slice(0, half), state, lastReview);
+    if (!first.ok) return first;
+    const second = await publishSet(client, input2, comments.slice(half), state, {
+      id: first.reviewId ?? lastReview.id,
+      url: first.reviewUrl ?? lastReview.url
+    });
+    return {
+      ok: second.ok,
+      reviewId: second.reviewId ?? first.reviewId,
+      reviewUrl: second.reviewUrl ?? first.reviewUrl,
+      published: [...first.published, ...second.published],
+      dropped: [...first.dropped, ...second.dropped],
+      detail: second.detail ?? first.detail ?? state.detail
+    };
+  }
+}
+async function publishReview(client, input2) {
+  const state = { attempts: 0, published: [], dropped: [], detail: null };
+  const lastReview = { id: null, url: null };
+  if (input2.comments.length === 0) {
+    try {
+      const review = await postReview(client, input2, []);
+      return {
+        ok: true,
+        reviewId: review.id ?? null,
+        reviewUrl: review.html_url ?? null,
+        dropped: [],
+        degraded: false,
+        detail: null
+      };
+    } catch (error62) {
+      if (error62 instanceof GithubError) {
+        return { ok: false, reviewId: null, reviewUrl: null, dropped: [], degraded: false, detail: `GitHub rejected the review: ${error62.message}` };
+      }
+      throw error62;
+    }
+  }
+  const result = await publishSet(client, input2, input2.comments, state, lastReview);
+  if (result.ok && result.published.length === 0 && input2.comments.length > 0) {
+    try {
+      const review = await postReview(client, input2, []);
+      return {
+        ok: true,
+        reviewId: review.id ?? null,
+        reviewUrl: review.html_url ?? null,
+        dropped: result.dropped,
+        degraded: true,
+        detail: `GitHub rejected all ${input2.comments.length} inline comment(s). The summary was published without them, so this run's findings are not visible on the diff.`
+      };
+    } catch (error62) {
+      if (!(error62 instanceof GithubError)) throw error62;
+      return {
+        ok: false,
+        reviewId: null,
+        reviewUrl: null,
+        dropped: result.dropped,
+        degraded: true,
+        detail: `GitHub rejected the review: ${error62.message}`
+      };
+    }
+  }
+  return {
+    ok: result.ok,
+    reviewId: result.reviewId,
+    reviewUrl: result.reviewUrl,
+    dropped: result.dropped,
+    degraded: result.dropped.length > 0,
+    detail: result.dropped.length > 0 ? `GitHub rejected ${result.dropped.length} of ${input2.comments.length} inline comment(s) and they were omitted. ${result.published.length} were published.` : result.detail
+  };
+}
+
+// src/diagnostics.ts
+var ACTION_FAILURE_CODES = /* @__PURE__ */ new Set([
+  "CONFIG_INVALID",
+  "MISSING_CREDENTIALS",
+  "INVALID_GITHUB_CONTEXT",
+  "DIFF_PARSE_FAILED",
+  "OPENROUTER_AUTH_FAILED",
+  "INTERNAL_ERROR"
+]);
+function severityOf(code) {
+  return ACTION_FAILURE_CODES.has(code) ? "failure" : "expected";
+}
+function diagnostic(code, message, context) {
+  return { code, severity: severityOf(code), message, ...context ? { context } : {} };
+}
+function escapeForLog(value) {
+  return value.replace(/%/g, "%25").replace(/\r/g, "%0D").replace(/\n/g, "%0A");
+}
+function formatDiagnostic(d) {
+  const parts = [`[${d.code}]`, d.message];
+  if (d.context) {
+    const rendered = Object.entries(d.context).filter(([, v]) => v !== void 0).map(([k, v]) => `${k}=${String(v)}`);
+    if (rendered.length > 0) parts.push(`(${rendered.join(" ")})`);
+  }
+  return parts.join(" ");
+}
+var SECRET_PATTERNS = [
+  // OpenAI / OpenRouter style
+  /sk-[A-Za-z0-9_-]{16,}/g,
+  // GitHub tokens
+  /gh[pousr]_[A-Za-z0-9]{16,}/g,
+  // AWS access key ids
+  /AKIA[0-9A-Z]{16}/g,
+  // Google API keys
+  /AIza[0-9A-Za-z_-]{30,}/g,
+  // Slack
+  /xox[abprs]-[A-Za-z0-9-]{10,}/g,
+  // GitLab
+  /glpat-[A-Za-z0-9_-]{16,}/g
+];
+function redactSecrets(value) {
+  let out = value;
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, "[REDACTED]");
+  }
+  return out;
+}
+function renderValue(value) {
+  if (typeof value === "string") return value;
+  if (typeof value === "object" && value !== null) {
+    return JSON.stringify(value) ?? "[unserialisable]";
+  }
+  if (typeof value === "number" || typeof value === "boolean") return String(value);
+  if (typeof value === "bigint") return value.toString();
+  return "";
+}
+function sanitize(fields) {
+  if (!fields) return {};
+  const out = {};
+  for (const [key, value] of Object.entries(fields)) {
+    if (value === void 0) continue;
+    out[key] = redactSecrets(renderValue(value));
+  }
+  return out;
+}
+function formatLine(level, message, fields) {
+  const safe = redactSecrets(message);
+  const extras = sanitize(fields);
+  const rendered = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join(" ");
+  return rendered ? `${level} ${safe} ${rendered}` : `${level} ${safe}`;
+}
+function firstLine(value) {
+  const line = value.split("\n", 1)[0] ?? value;
+  return line.length > 400 ? `${line.slice(0, 400)}\u2026` : line;
+}
+function createLogger(opts) {
+  const debugEnabled = opts?.debug ?? process.env["RUNNER_DEBUG"] === "1";
+  const diagnostics = [];
+  const emit = (level, command, message, fields) => {
+    const line = formatLine(level, message, fields);
+    if (command) {
+      process.stdout.write(`${command}::${escapeForLog(line)}
+`);
+    } else {
+      process.stdout.write(`${escapeForLog(line)}
+`);
+    }
+  };
+  const logger = {
+    info: (message, fields) => emit("info", "", message, fields),
+    warn: (message, fields) => emit("warn", "", message, fields),
+    error: (message, fields) => emit("error", "::error", firstLine(message), fields),
+    annotation: (message, fields) => emit("warning", "::warning", firstLine(message), fields),
+    debug: (message, fields) => {
+      if (debugEnabled) emit("debug", "", message, fields);
+    },
+    record: (d) => {
+      diagnostics.push(d);
+      emit(d.severity === "failure" ? "error" : "warning", "", formatDiagnostic(d));
+    },
+    log: (code, message, context) => {
+      const d = diagnostic(code, message, context);
+      logger.record(d);
+      return d;
+    },
+    get diagnostics() {
+      return diagnostics;
+    },
+    counts: () => {
+      const out = {};
+      for (const d of diagnostics) out[d.code] = (out[d.code] ?? 0) + 1;
+      return out;
+    }
+  };
+  return logger;
+}
 var SUPPORTED_PR_EVENTS = /* @__PURE__ */ new Set([
   "opened",
   "reopened",
@@ -22151,17 +22877,6 @@ function parseEventContext(env = process.env) {
     ok: true,
     context: { eventName, action: action ?? "", owner, repo, pullNumber, eventHeadSha }
   };
-}
-
-// src/github/pr.ts
-function prPath(owner, repo, pullNumber) {
-  return `/repos/${owner}/${repo}/pulls/${pullNumber}`;
-}
-async function getPullRequest(client, owner, repo, pullNumber) {
-  return client.get(prPath(owner, repo, pullNumber));
-}
-async function listPullRequestFiles(client, owner, repo, pullNumber) {
-  return client.getAllPages(`${prPath(owner, repo, pullNumber)}/files`);
 }
 
 // src/diff/render.ts
@@ -23229,17 +23944,17 @@ async function run(env = process.env) {
   const findings = [];
   const modelsUsed = /* @__PURE__ */ new Set();
   let chunksReviewed = 0;
-  for (const [index] of affordable.selected.entries()) {
+  for (const [index2] of affordable.selected.entries()) {
     const outcome = await scheduler.runTask(
       buildChatRequest(
-        rendered[index],
+        rendered[index2],
         usableModels[0],
         config2.maxOutputTokens
       ),
       usableModels
     );
     if (!outcome.ok) {
-      logger.log(outcome.diagnostic, `Chunk ${index + 1} could not be reviewed.`, {
+      logger.log(outcome.diagnostic, `Chunk ${index2 + 1} could not be reviewed.`, {
         requests_spent: outcome.requestsSpent,
         attempts: outcome.attempts.map((a) => `${a.modelId}:${a.outcome}`).join(", ")
       });
@@ -23251,16 +23966,16 @@ async function run(env = process.env) {
     if (!parsed2.ok) {
       logger.log(
         parsed2.unparseable ? "MODEL_OUTPUT_INVALID" : "MODEL_OUTPUT_INVALID",
-        `Chunk ${index + 1} returned output that did not match the finding schema.`,
+        `Chunk ${index2 + 1} returned output that did not match the finding schema.`,
         { issues: parsed2.issues.slice(0, 4).map((i) => `${i.path}: ${i.message}`).join("; ") }
       );
       continue;
     }
     for (const note of parsed2.notes) {
-      logger.debug("model output note", { chunk: index, note });
+      logger.debug("model output note", { chunk: index2, note });
     }
     if (parsed2.value.findings.length === 0) {
-      logger.debug("chunk reviewed, no findings", { chunk: index });
+      logger.debug("chunk reviewed, no findings", { chunk: index2 });
     }
     findings.push(
       ...parsed2.value.findings.map(
@@ -23274,37 +23989,146 @@ async function run(env = process.env) {
       )
     );
     logger.debug("chunk reviewed", {
-      chunk: index,
+      chunk: index2,
       findings: parsed2.value.findings.length,
       model: outcome.result.modelId,
       prompt_tokens: outcome.result.usage.promptTokens,
       completion_tokens: outcome.result.usage.completionTokens
     });
   }
-  const requestsUsed = scheduler.budget.spent;
-  logger.info("review complete", {
+  const index = buildIndex(parsed);
+  const prFilePaths = new Set(files.map((f) => f.filename));
+  const anchors = resolveAnchors(
+    findings.map((f) => ({ path: f.path, quote: f.buggyCodeQuote })),
+    index,
+    prFilePaths
+  );
+  const candidates = [];
+  const unanchored = [];
+  for (const key of anchors.order) {
+    const resolution = anchors.anchors.get(key);
+    const source = findings.find((f) => anchorKeyFor(f.path, f.buggyCodeQuote) === key);
+    if (resolution === void 0 || source === void 0) continue;
+    if (!resolution.ok) {
+      unanchored.push({ path: source.path, explanation: source.explanation, severity: source.severity });
+      logger.debug("finding could not be anchored", { path: source.path, code: resolution.code, rung: resolution.rung });
+      continue;
+    }
+    const text = anchoredText(resolution.anchor, index);
+    if (text === null) continue;
+    candidates.push({ finding: source, anchor: resolution.anchor, anchoredText: text });
+  }
+  const { accepted, rejected } = validateFindings(candidates, prFilePaths, index);
+  const deduped = dedupe(accepted);
+  for (const rejection of rejected) {
+    logger.debug("finding rejected before publication", { path: rejection.path, code: rejection.code });
+  }
+  for (const merge2 of deduped.merges) {
+    logger.debug("duplicate findings merged", { path: merge2.path, line: merge2.line });
+  }
+  logger.info("findings resolved", {
+    proposed: findings.length,
     chunks_reviewed: chunksReviewed,
-    chunks_planned: affordable.selected.length,
-    findings: findings.length,
-    requests_used: requestsUsed
+    anchored: candidates.length,
+    accepted: deduped.kept.length,
+    unanchored: unanchored.length,
+    rejected: rejected.length,
+    merged: deduped.dropped
   });
-  if (findings.length > config2.maxFindingsPerChunk * Math.max(1, chunksReviewed)) {
-    logger.log(
-      "FINDING_COUNT_EXCEEDED",
-      `The model produced ${findings.length} findings across ${chunksReviewed} chunks, above the configured expectation of ${config2.maxFindingsPerChunk} per chunk. This usually means the model is padding with stylistic observations rather than reporting defects.`,
-      { findings: findings.length, chunks: chunksReviewed }
+  if (unanchored.length > 0) {
+    logger.annotation(
+      `${unanchored.length} finding(s) could not be resolved to exactly one line and will appear in the review body without an inline comment.`
     );
   }
+  if (rejected.length > 0) {
+    logger.annotation(
+      `${rejected.length} finding(s) were discarded before publication. The review body lists why.`
+    );
+  }
+  const freshness = await confirmHeadUnchanged(client, {
+    owner: identity.owner,
+    repo: identity.repo,
+    pullNumber: identity.pullNumber,
+    expectedHeadSha: identity.reviewHeadSha
+  });
+  if (!freshness.ok) {
+    logger.log(
+      freshness.reason === "stale" ? "STALE_HEAD_SHA" : "GITHUB_PUBLISH_FAILED",
+      freshness.detail
+    );
+    return finish(
+      logger,
+      {
+        ...baseOutputs(),
+        files_reviewed: String(stats.files),
+        findings_count: String(deduped.kept.length),
+        unanchored_count: String(unanchored.length),
+        model_used: [...modelsUsed].join(","),
+        requests_used: String(scheduler.budget.spent)
+      },
+      "skipped_stale"
+    );
+  }
+  const body = renderSummary({
+    findings: deduped.kept,
+    unanchored,
+    rejections: rejected,
+    modelUsed: [...modelsUsed].join(","),
+    requestsUsed: scheduler.budget.spent,
+    filesReviewed: stats.files,
+    filesInPr: changedFileCount,
+    privacyMode: config2.privacyMode,
+    promptVersion: PROMPT_VERSION
+  });
+  const published = await publishReview(client, {
+    owner: identity.owner,
+    repo: identity.repo,
+    pullNumber: identity.pullNumber,
+    commitId: identity.reviewHeadSha,
+    body,
+    comments: deduped.kept.map((f) => ({
+      path: f.anchor.path,
+      body: renderComment(f),
+      line: f.anchor.line,
+      side: f.anchor.side,
+      ...f.anchor.startLine !== void 0 ? { startLine: f.anchor.startLine, startSide: f.anchor.startSide ?? f.anchor.side } : {}
+    }))
+  });
+  if (!published.ok) {
+    logger.log("GITHUB_PUBLISH_FAILED", published.detail ?? "The review could not be published.");
+    return finish(
+      logger,
+      {
+        ...baseOutputs(),
+        files_reviewed: String(stats.files),
+        findings_count: String(deduped.kept.length),
+        unanchored_count: String(unanchored.length),
+        model_used: [...modelsUsed].join(","),
+        requests_used: String(scheduler.budget.spent)
+      },
+      "skipped_publish_failed"
+    );
+  }
+  if (published.degraded) {
+    logger.log("GITHUB_PUBLISH_DEGRADED", published.detail ?? "Some inline comments were omitted.");
+  }
+  logger.info("review published", {
+    findings: deduped.kept.length,
+    dropped_comments: published.dropped.length,
+    url: published.reviewUrl
+  });
   return finish(
     logger,
     {
       ...baseOutputs(),
       files_reviewed: String(stats.files),
-      findings_count: String(findings.length),
+      findings_count: String(deduped.kept.length),
+      unanchored_count: String(unanchored.length),
       model_used: [...modelsUsed].join(","),
-      requests_used: String(requestsUsed)
+      requests_used: String(scheduler.budget.spent),
+      review_url: published.reviewUrl ?? ""
     },
-    "skipped_publisher_not_implemented"
+    deduped.kept.length === 0 ? "no_findings" : "reviewed"
   );
 }
 function finish(logger, partial2, statusHint) {

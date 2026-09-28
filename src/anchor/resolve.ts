@@ -303,6 +303,23 @@ function reject(
 }
 
 /**
+ * The lookup key for a `(path, quote)` pair.
+ *
+ * Exported because callers must map a key from `resolveAnchors` back to the
+ * finding that produced it, and reconstructing this string by hand is a
+ * silent-failure bug: the separator is U+0000, not a space, and a mismatched
+ * key means every finding quietly disappears without an error.
+ *
+ * The null byte is the right separator precisely because it cannot appear in
+ * either half — the schema rejects control characters in both `path` and
+ * `buggyCodeQuote` — so the key is unambiguous rather than merely unlikely to
+ * collide.
+ */
+export function anchorKeyFor(path: string, quote: string): string {
+  return `${path}\u0000${quote}`;
+}
+
+/**
  * Resolve a batch of findings, returning anchors and rejections separately.
  *
  * Rejections carry only structured metadata and a reason. They never carry
@@ -317,7 +334,7 @@ export function resolveAnchors(
   const order: string[] = [];
 
   for (const input of inputs) {
-    const key = `${input.path} ${input.quote}`;
+    const key = anchorKeyFor(input.path, input.quote);
     if (anchors.has(key)) continue;
     order.push(key);
 

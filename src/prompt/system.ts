@@ -99,6 +99,12 @@ does not match one of the headers shown cannot be placed and will be discarded.
 \`buggyCodeQuote\` must be copied VERBATIM from the diff, character for character,
 with no line numbers and no leading \`+\` or \`-\` markers. This text is the only
 thing used to position your comment, so an approximate quote will be discarded.
+
+A quote must START at the beginning of a line and END at the end of a line. A
+fragment from the middle of a line cannot be located and will be discarded. For
+a multi-line finding, quote the consecutive whole lines including the newlines
+between them.
+
 Quote the smallest span that demonstrates the defect, not the whole function.
 
 \`explanation\` must state the specific failure mode: what breaks, under what

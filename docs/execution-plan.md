@@ -1,7 +1,7 @@
 # FreeReview — Execution Plan
 
-**Status:** In progress — Phases 0–5 complete; `run.ts` ends at the Phase 6 publisher boundary
-**Date:** 2026-09-27 (Phases 4 and 5 completed 2026-09-28)
+**Status:** In progress — Phases 0–6 complete; live `ReviewTest` verification outstanding
+**Date:** 2026-09-27 (Phases 4–6 completed 2026-09-28)
 **Canonical location:** this file; copied verbatim to `docs/execution-plan.md` at implementation start
 **Derived from:** `docs/plan.md` (design record — see its new status/supersedes header)
 
@@ -747,13 +747,57 @@ Deviations from the plan, and why:
 
 Wiring: `run.ts` sends the first real requests. Chunks are reviewed through the scheduler, responses are parsed and schema-validated, and findings are collected — but **nothing is anchored or published yet**, so the run ends at `skipped_publisher_not_implemented`. An unanchored finding has no safe destination; Phase 6 gives it one.
 
-### Phase 6 — Validation, dedupe, publisher (1.5 days)
+### Phase 6 — Validation, dedupe, publisher (1.5 days) — **COMPLETE (code)**
 `pipeline/{validate,dedupe,stale}.ts`, `output/{comment,suggestion,summary}.ts`, `github/publish.ts`.
 **Exit:** **`freereview-sandbox` receives a `COMMENT` review with correctly anchored inline comments**, verified visually and via `GET pulls/{n}/reviews/{id}/comments` asserting `line`/`side`/`original_line`; `STALE_HEAD_SHA` proven by a test mutating head SHA mid-run; publish-422 degradation proven.
+
+**Delivered as:** `pipeline/{validate,dedupe,stale}.ts`, `output/comment.ts` (comment + suggestion + summary in one module — they share the neutralisation rules, and splitting them would mean three copies of the same escaping), `github/publish.ts`. The live `ReviewTest` verification is the one item outstanding, and it is blocked only on the author's willingness to spend quota.
+
+Deviations from the plan, and why:
+
+- **422 recovery recurses into *both* halves rather than keeping the first.** The plan said "binary search". The first implementation kept the first half and discarded the rest, so one bad comment silently suppressed every comment after it — the exact "nothing found" illusion the recovery exists to prevent, caused by a bug in the recovery rather than by a rejection. It also posts a summary-only review when *every* comment is rejected, because silence reads as a clean review.
+- **422 recovery is bounded at 24 attempts.** A pathological rejection set would otherwise generate O(n log n) API calls, each of which can trip a secondary rate limit and take the review down with it.
+- **A `path`/`anchor` agreement check was added.** Validation read `finding.path` while `anchoredText` read `anchor.path`, and nothing verified they matched. A disagreement renders as a comment about one file quoting code from another, and passes every other check.
+- **A suggestion containing a fence is stripped, not rendered.** GitHub's suggestion fence is exactly ` ```suggestion ` and cannot be grown the way a display fence can, so there is no safe rendering. The *suggestion* is dropped and the finding kept, because the observation is still real.
+- **A thin-explanation floor was added** (20 chars, plus a small vagueness screen). This is a floor against degenerate padding, not a quality judgement — real quality is Phase 7's measurement against ground truth, and a local "is this good" heuristic would be a second, worse rubric.
+- **Unanchorable findings are published under "Not placed on a line"**, not silently dropped. A summary showing only what succeeded reads as "this is everything".
+- **`anchorKeyFor` is now exported from `anchor/resolve.ts`.** The `(path, quote)` lookup key uses U+0000 as a separator. `run.ts` originally rebuilt that string by hand with a space, which matched nothing and dropped every finding with no error at all. Sharing the helper removes the class of bug rather than the instance.
+
+Wiring: `run.ts` now anchors, validates, dedupes, re-checks the head SHA, and publishes. `event: COMMENT` is the only value the payload can take, asserted at both the publisher and the pipeline level.
 
 ### Phase 7 — Golden dataset & evaluation (3–4 days — largest single investment)
 Author **Stage A (14)** + `validate:fixtures`; `eval/{run,score}.ts` + `thresholds.json`; run dev set against `qwen/qwen3.8-27b:free`; cluster failures; ≤ 8 targeted prompt iterations (hard cap), each measured; run regression set; run held-out **once**; select the primary model on measured results; **then author Stage B (18)** informed by observed failures and re-measure.
 **Exit:** thresholds held-out column met; results committed to `docs/model-evaluation.md` with raw numbers; `MAX_PROMPT_ITERATIONS` and `MAX_EVAL_REQUESTS` respected.
+
+#### 7a. Key separation and spend caps (agreed 2026-09-28, before authoring fixtures)
+
+Two controls that exist because the evaluation key and the production key must not share a failure mode.
+
+**Separate keys.** `OPENROUTER_API_KEY_EVAL` is used by `eval/run.ts`; `OPENROUTER_API_KEY` is what the action itself reads and what a consumer supplies. The eval key may be funded and the production key need not be. A guard regression in the action, or a bug in the eval harness that mis-estimates cost, cannot reach the credential consumers actually depend on.
+
+**Per-key spend limit on the eval key.** OpenRouter exposes `limit`, `limit_remaining`, and `limit_reset` per key, reported by `GET /api/v1/key`. The eval key gets an explicit cap, refreshed deliberately before a long run rather than topped up automatically. Rationale: the three paid-routing guards are tested, but the account balance is the last line of defence if all three fail simultaneously, and a cap turns that tail risk from the full balance into a fixed number of cents. `max_requests_per_run: 8` bounds a single run; the key cap bounds the session.
+
+**Never allow a negative balance.** A negative account balance returns 402 *including for free models*, so a free-models-only workflow can still lock itself out. A run that observes a balance below the eval cap stops rather than continuing into debt.
+
+#### 7b. Quota headroom — decision pending, not blocking
+
+OpenRouter gates free-model requests on **credits purchased all time**, not balance: under $10 purchased is 50 RPD, $10 or more is 1000 RPD. Verified against the limits reference 2026-09-28. The entitlement survives spending the balance to zero, and the credits remain usable, so the purchase is a one-time unlock on requests that still price at zero.
+
+The arithmetic that motivates it: Stage A is 14 fixtures at roughly 1.3 requests each, across up to 8 measured prompt iterations, plus a regression re-measure, one held-out pass, and Stage B's 18 — approximately **200 requests**. At 50/day that is four or more days, and the real cost is not the request count but the 24-hour UTC-reset round trip per iteration. Prompt tuning is a feedback loop, and gating each iteration on midnight removes the loop.
+
+Three caveats recorded rather than argued away:
+
+- A 5.5% platform fee applies to credit purchases, and the docs do not state whether the threshold measures the charged amount or the post-fee credit. **Buy $12, not $10**, to clear the bar either way.
+- The balance is real money. A simultaneous failure of all three paid-routing guards would spend it. `provider.max_price: 0` is enforced server-side, so this is a tail risk, and 7a's per-key cap bounds it.
+- **RPM stays 20 at any funding level.** Provider-side 429s are upstream saturation and credits do not affect them. A provider 429 must not be misdiagnosed as a quota ceiling.
+
+Until the decision is made, Phase 6 proceeds at 50/day, which costs roughly 30–60 requests total — one to two days. That is affordable without the upgrade, and Phase 7 is the phase where it stops being affordable.
+
+#### 7c. Deduplicated eval requests
+
+A prompt iteration re-runs the same fixtures against the same diffs. The unchanged portion of a diff, and any fixture whose chunk content is byte-identical to the previous iteration, is served from a content-addressed local cache keyed by `(promptVersion, chunkHash, modelId)`. `temperature: 0` and a fixed seed make the response a function of the request, so a cache hit is not an approximation.
+
+This is worth building because it attacks the cost directly rather than the ceiling: it is the difference between ~200 requests and materially fewer, and it makes the *unfunded* path viable rather than merely slow. The cache is bypassable via `--no-cache` when a provider-side change makes a fresh response genuinely informative, which is a rarer event than it sounds and should be recorded when it happens.
 
 ### Phase 8 — Hardening, docs, release (1.5 days)
 Security review; secret/log audit with the seeded-secret test; rate-limit stress (30 synthetic PRs against the mock, assert ≤ 8 requests); stale-commit stress; `verify-models.yml`; `README.md` / `SECURITY.md` / `LICENSE`; `release.yml`; marketplace metadata.

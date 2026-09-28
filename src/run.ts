@@ -24,6 +24,13 @@ import { evaluateModel, fetchCatalog, fetchQuota, quotaDecision } from "./llm/ca
 import { OpenRouterClient } from "./llm/client.js";
 import { Scheduler } from "./llm/scheduler.js";
 import { buildChatRequest, parseResponse } from "./prompt/index.js";
+import { buildIndex } from "./diff/index.js";
+import { anchorKeyFor, resolveAnchors } from "./anchor/resolve.js";
+import { anchoredText, validateFindings, type Candidate } from "./pipeline/validate.js";
+import { dedupe } from "./pipeline/dedupe.js";
+import { confirmHeadUnchanged } from "./pipeline/stale.js";
+import { renderComment, renderSummary } from "./output/comment.js";
+import { publishReview } from "./github/publish.js";
 import { createLogger, type Diagnostic, type DiagnosticCode, type Logger } from "./diagnostics.js";
 import { GithubClient, GithubError } from "./github/client.js";
 import { parseEventContext } from "./github/context.js";
@@ -36,7 +43,7 @@ import { checkChangedLines, checkChunkBudgets, selectAffordableChunks } from "./
 import { estimatorFromConfig } from "./pipeline/tokens.js";
 import { evaluateEligibility, type EligibilityResult } from "./pipeline/eligibility.js";
 import { CONFIG_VERSION, PROMPT_VERSION } from "./prompt/version.js";
-import type { DiffFile, FileStatus, RawFinding } from "./types.js";
+import type { DiffFile, FileStatus, RawFinding, Severity } from "./types.js";
 
 /**
  * Map GitHub's file status onto the parser's vocabulary.
@@ -662,38 +669,175 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     });
   }
 
-  const requestsUsed = scheduler.budget.spent;
+  // --- 12. Anchor ---------------------------------------------------------
+  // A finding becomes a comment only if it resolves to exactly one valid GitHub
+  // location. Everything the model produced is still untrusted; from here on,
+  // only deterministic resolution decides what gets published.
+  const index = buildIndex(parsed);
+  const prFilePaths = new Set<string>(files.map((f) => f.filename));
 
-  logger.info("review complete", {
+  const anchors = resolveAnchors(
+    findings.map((f) => ({ path: f.path, quote: f.buggyCodeQuote })),
+    index,
+    prFilePaths,
+  );
+
+  const candidates: Candidate[] = [];
+  const unanchored: { path: string; explanation: string; severity: Severity }[] = [];
+
+  for (const key of anchors.order) {
+    const resolution = anchors.anchors.get(key);
+    // Look the finding up through the shared key helper. Rebuilding the key by
+    // hand here is how every finding silently vanished the first time — the
+    // separator is a null byte, so a hand-written space produced zero matches
+    // and no error.
+    const source = findings.find((f) => anchorKeyFor(f.path, f.buggyCodeQuote) === key);
+    if (resolution === undefined || source === undefined) continue;
+
+    if (!resolution.ok) {
+      unanchored.push({ path: source.path, explanation: source.explanation, severity: source.severity });
+      logger.debug("finding could not be anchored", { path: source.path, code: resolution.code, rung: resolution.rung });
+      continue;
+    }
+
+    const text = anchoredText(resolution.anchor, index);
+    if (text === null) continue;
+    candidates.push({ finding: source, anchor: resolution.anchor, anchoredText: text });
+  }
+
+  const { accepted, rejected } = validateFindings(candidates, prFilePaths, index);
+  const deduped = dedupe(accepted);
+
+  for (const rejection of rejected) {
+    logger.debug("finding rejected before publication", { path: rejection.path, code: rejection.code });
+  }
+  for (const merge of deduped.merges) {
+    logger.debug("duplicate findings merged", { path: merge.path, line: merge.line });
+  }
+
+  logger.info("findings resolved", {
+    proposed: findings.length,
     chunks_reviewed: chunksReviewed,
-    chunks_planned: affordable.selected.length,
-    findings: findings.length,
-    requests_used: requestsUsed,
+    anchored: candidates.length,
+    accepted: deduped.kept.length,
+    unanchored: unanchored.length,
+    rejected: rejected.length,
+    merged: deduped.dropped,
   });
 
-  if (findings.length > config.maxFindingsPerChunk * Math.max(1, chunksReviewed)) {
-    logger.log(
-      "FINDING_COUNT_EXCEEDED",
-      `The model produced ${findings.length} findings across ${chunksReviewed} chunks, above the ` +
-        `configured expectation of ${config.maxFindingsPerChunk} per chunk. This usually means the ` +
-        "model is padding with stylistic observations rather than reporting defects.",
-      { findings: findings.length, chunks: chunksReviewed },
+  if (unanchored.length > 0) {
+    logger.annotation(
+      `${unanchored.length} finding(s) could not be resolved to exactly one line and will appear in ` +
+        "the review body without an inline comment.",
+    );
+  }
+  if (rejected.length > 0) {
+    logger.annotation(
+      `${rejected.length} finding(s) were discarded before publication. The review body lists why.`,
     );
   }
 
-  // Phase 6 anchors, deduplicates, and publishes. Until then nothing reaches a
-  // pull request, which is deliberate: an unanchored finding has no safe
-  // destination.
+  // --- 13. Staleness ------------------------------------------------------
+  // Re-read the pull request immediately before publishing. A run takes real
+  // time — chunking, one or more model requests with backoff — and a push in
+  // that window means the diff these findings describe is no longer the head.
+  // Publishing anyway attaches confident claims to lines that have moved.
+  const freshness = await confirmHeadUnchanged(client, {
+    owner: identity.owner,
+    repo: identity.repo,
+    pullNumber: identity.pullNumber,
+    expectedHeadSha: identity.reviewHeadSha,
+  });
+
+  if (!freshness.ok) {
+    logger.log(
+      freshness.reason === "stale" ? "STALE_HEAD_SHA" : "GITHUB_PUBLISH_FAILED",
+      freshness.detail,
+    );
+    return finish(
+      logger,
+      {
+        ...baseOutputs(),
+        files_reviewed: String(stats.files),
+        findings_count: String(deduped.kept.length),
+        unanchored_count: String(unanchored.length),
+        model_used: [...modelsUsed].join(","),
+        requests_used: String(scheduler.budget.spent),
+      },
+      "skipped_stale",
+    );
+  }
+
+  // --- 14. Publish --------------------------------------------------------
+  const body = renderSummary({
+    findings: deduped.kept,
+    unanchored,
+    rejections: rejected,
+    modelUsed: [...modelsUsed].join(","),
+    requestsUsed: scheduler.budget.spent,
+    filesReviewed: stats.files,
+    filesInPr: changedFileCount,
+    privacyMode: config.privacyMode,
+    promptVersion: PROMPT_VERSION,
+  });
+
+  const published = await publishReview(client, {
+    owner: identity.owner,
+    repo: identity.repo,
+    pullNumber: identity.pullNumber,
+    commitId: identity.reviewHeadSha,
+    body,
+    comments: deduped.kept.map((f) => ({
+      path: f.anchor.path,
+      body: renderComment(f),
+      line: f.anchor.line,
+      side: f.anchor.side,
+      ...(f.anchor.startLine !== undefined
+        ? { startLine: f.anchor.startLine, startSide: f.anchor.startSide ?? f.anchor.side }
+        : {}),
+    })),
+  });
+
+  if (!published.ok) {
+    logger.log("GITHUB_PUBLISH_FAILED", published.detail ?? "The review could not be published.");
+    return finish(
+      logger,
+      {
+        ...baseOutputs(),
+        files_reviewed: String(stats.files),
+        findings_count: String(deduped.kept.length),
+        unanchored_count: String(unanchored.length),
+        model_used: [...modelsUsed].join(","),
+        requests_used: String(scheduler.budget.spent),
+      },
+      "skipped_publish_failed",
+    );
+  }
+
+  if (published.degraded) {
+    // Visible in the run, not just in a log line. A developer who sees four
+    // findings in the summary and two comments on the diff deserves to know why.
+    logger.log("GITHUB_PUBLISH_DEGRADED", published.detail ?? "Some inline comments were omitted.");
+  }
+
+  logger.info("review published", {
+    findings: deduped.kept.length,
+    dropped_comments: published.dropped.length,
+    url: published.reviewUrl,
+  });
+
   return finish(
     logger,
     {
       ...baseOutputs(),
       files_reviewed: String(stats.files),
-      findings_count: String(findings.length),
+      findings_count: String(deduped.kept.length),
+      unanchored_count: String(unanchored.length),
       model_used: [...modelsUsed].join(","),
-      requests_used: String(requestsUsed),
+      requests_used: String(scheduler.budget.spent),
+      review_url: published.reviewUrl ?? "",
     },
-    "skipped_publisher_not_implemented",
+    deduped.kept.length === 0 ? "no_findings" : "reviewed",
   );
 }
 

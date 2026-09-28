@@ -113,6 +113,20 @@ describe("the system prompt constrains what may be reported", () => {
     expect(buildSystemPrompt("PROMPT_JSON")).toMatch(/do not invent a patch/i);
   });
 
+  it("requires quotes to start and end at line boundaries", () => {
+    // The resolver matches at line granularity, so a mid-line fragment cannot
+    // be located at all. This is the single most common way a model loses an
+    // otherwise correct finding, and it is a prompt fix rather than a parser
+    // fix: the parser is strict by design.
+    const prompt = buildSystemPrompt("PROMPT_JSON");
+    expect(prompt).toMatch(/START at the beginning of a line/);
+    expect(prompt).toMatch(/END at the end of a line/);
+  });
+
+  it("explains how to quote a multi-line finding", () => {
+    expect(buildSystemPrompt("PROMPT_JSON")).toMatch(/consecutive whole lines/i);
+  });
+
   it("makes an empty result explicitly acceptable", () => {
     // Without this, models pad with stylistic observations rather than return
     // nothing, which is the single largest source of noise.
