@@ -18,13 +18,17 @@ import {
   eligibleModels,
   loadConfig,
   type Config,
+  type ModelDefinition,
 } from "./config.js";
 import { evaluateModel, fetchCatalog, fetchQuota, quotaDecision } from "./llm/catalog.js";
+import { OpenRouterClient } from "./llm/client.js";
+import { Scheduler } from "./llm/scheduler.js";
+import { buildChatRequest, parseResponse } from "./prompt/index.js";
 import { createLogger, type Diagnostic, type DiagnosticCode, type Logger } from "./diagnostics.js";
 import { GithubClient, GithubError } from "./github/client.js";
 import { parseEventContext } from "./github/context.js";
 import { getPullRequest, listPullRequestFiles, type PrFile } from "./github/pr.js";
-import { renderChunk } from "./diff/render.js";
+import { renderChunk, type RenderedChunk } from "./diff/render.js";
 import { parseUnifiedDiff } from "./diff/parse.js";
 import { buildChunks, chunkStats } from "./pipeline/chunk.js";
 import { filterFiles } from "./pipeline/filter.js";
@@ -32,7 +36,7 @@ import { checkChangedLines, checkChunkBudgets, selectAffordableChunks } from "./
 import { estimatorFromConfig } from "./pipeline/tokens.js";
 import { evaluateEligibility, type EligibilityResult } from "./pipeline/eligibility.js";
 import { CONFIG_VERSION, PROMPT_VERSION } from "./prompt/version.js";
-import type { DiffFile, FileStatus } from "./types.js";
+import type { DiffFile, FileStatus, RawFinding } from "./types.js";
 
 /**
  * Map GitHub's file status onto the parser's vocabulary.
@@ -575,16 +579,121 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     prompt_tokens: rendered.reduce((sum, r) => sum + r.estimatedTokens, 0),
   });
 
-  // Phase 4 wires the OpenRouter client and scheduler here. The context is built,
-  // filtered, chunked, rendered, and budget-verified; no request has been sent.
+  // --- 11. Review ------------------------------------------------------
+  // The first code path that spends quota. Everything above it is free.
+  //
+  // Findings are collected across chunks without being anchored or published
+  // yet. Validation, deduplication, stale-checking, and publication are Phase 6;
+  // stopping here means the output is "the model said this" and nothing more,
+  // which is the honest state of affairs at this boundary.
+  const openRouter = new OpenRouterClient({ config });
+  const scheduler = new Scheduler({ client: openRouter, config });
+  // The scheduler needs the true remaining count and applies the reserve itself.
+  scheduler.setDailyRemaining(quota?.remaining ?? null);
+
+  const findings: RawFinding[] = [];
+  const modelsUsed = new Set<string>();
+  let chunksReviewed = 0;
+
+  for (const [index] of affordable.selected.entries()) {
+    // Every eligible model is offered, in priority order. The scheduler reaches
+    // a later one only through a failure that warrants it, so this does not
+    // fan out across the pool. The primary seeds the request shape; the
+    // scheduler substitutes the model id per attempt.
+    const outcome = await scheduler.runTask(
+      buildChatRequest(
+        rendered[index] as RenderedChunk,
+        usableModels[0] as ModelDefinition,
+        config.maxOutputTokens,
+      ),
+      usableModels,
+    );
+
+    if (!outcome.ok) {
+      logger.log(outcome.diagnostic, `Chunk ${index + 1} could not be reviewed.`, {
+        requests_spent: outcome.requestsSpent,
+        attempts: outcome.attempts.map((a) => `${a.modelId}:${a.outcome}`).join(", "),
+      });
+      continue;
+    }
+
+    modelsUsed.add(outcome.result.modelId);
+    chunksReviewed += 1;
+
+    const parsed = parseResponse(outcome.result.content, outcome.result.parsed);
+    if (!parsed.ok) {
+      logger.log(
+        parsed.unparseable ? "MODEL_OUTPUT_INVALID" : "MODEL_OUTPUT_INVALID",
+        `Chunk ${index + 1} returned output that did not match the finding schema.`,
+        { issues: parsed.issues.slice(0, 4).map((i) => `${i.path}: ${i.message}`).join("; ") },
+      );
+      continue;
+    }
+
+    for (const note of parsed.notes) {
+      logger.debug("model output note", { chunk: index, note });
+    }
+
+    // A model that returns nothing is a valid answer, and the single most useful
+    // one. It must not be recorded as a failure, and it must not be allowed to
+    // silently become "this file is clean" in the summary.
+    if (parsed.value.findings.length === 0) {
+      logger.debug("chunk reviewed, no findings", { chunk: index });
+    }
+
+    findings.push(
+      ...parsed.value.findings.map(
+        (f): RawFinding => ({
+          path: f.path,
+          buggyCodeQuote: f.buggyCodeQuote,
+          explanation: f.explanation,
+          severity: f.severity,
+          suggestedCode: f.suggestedCode,
+        }),
+      ),
+    );
+
+    logger.debug("chunk reviewed", {
+      chunk: index,
+      findings: parsed.value.findings.length,
+      model: outcome.result.modelId,
+      prompt_tokens: outcome.result.usage.promptTokens,
+      completion_tokens: outcome.result.usage.completionTokens,
+    });
+  }
+
+  const requestsUsed = scheduler.budget.spent;
+
+  logger.info("review complete", {
+    chunks_reviewed: chunksReviewed,
+    chunks_planned: affordable.selected.length,
+    findings: findings.length,
+    requests_used: requestsUsed,
+  });
+
+  if (findings.length > config.maxFindingsPerChunk * Math.max(1, chunksReviewed)) {
+    logger.log(
+      "FINDING_COUNT_EXCEEDED",
+      `The model produced ${findings.length} findings across ${chunksReviewed} chunks, above the ` +
+        `configured expectation of ${config.maxFindingsPerChunk} per chunk. This usually means the ` +
+        "model is padding with stylistic observations rather than reporting defects.",
+      { findings: findings.length, chunks: chunksReviewed },
+    );
+  }
+
+  // Phase 6 anchors, deduplicates, and publishes. Until then nothing reaches a
+  // pull request, which is deliberate: an unanchored finding has no safe
+  // destination.
   return finish(
     logger,
     {
       ...baseOutputs(),
       files_reviewed: String(stats.files),
-      requests_used: "0",
+      findings_count: String(findings.length),
+      model_used: [...modelsUsed].join(","),
+      requests_used: String(requestsUsed),
     },
-    "skipped_pipeline_not_implemented",
+    "skipped_publisher_not_implemented",
   );
 }
 

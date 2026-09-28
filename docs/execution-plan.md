@@ -1,7 +1,7 @@
 # FreeReview — Execution Plan
 
-**Status:** In progress — Phases 0–4 complete; `run.ts` ends at the Phase 4 boundary
-**Date:** 2026-09-27 (Phase 4 completed 2026-09-28)
+**Status:** In progress — Phases 0–5 complete; `run.ts` ends at the Phase 6 publisher boundary
+**Date:** 2026-09-27 (Phases 4 and 5 completed 2026-09-28)
 **Canonical location:** this file; copied verbatim to `docs/execution-plan.md` at implementation start
 **Derived from:** `docs/plan.md` (design record — see its new status/supersedes header)
 
@@ -731,9 +731,21 @@ Deviations from the plan, and why:
 
 Wiring: `run.ts` probes the catalog just after file retrieval (before the size gate, since a model that cannot serve any request is a cheaper thing to reject first) and the quota after chunk selection, then stops at the `skipped_pipeline_not_implemented` boundary with **zero requests sent**. Phase 5 replaces that boundary with the prompt and the first real call.
 
-### Phase 5 — Prompt, schema, parsing (1.5 days)
+### Phase 5 — Prompt, schema, parsing (1.5 days) — **COMPLETE**
 `schema/{finding,json-schema}.ts`, `prompt/{system,user}.ts`, `parse/{structured,text,repair}.ts`.
 **Exit:** golden dataset runs end-to-end against mocked outputs in all three capability modes; injection/format fixtures pass; `PROMPT_VERSION` exported and stamped into every record.
+
+**Delivered as:** `schema/{finding,json-schema}.ts`, `prompt/{system,user,index}.ts`, `parse/{extract,repair}.ts`.
+
+Deviations from the plan, and why:
+
+- **`parse/structured.ts` and `parse/text.ts` merged into `parse/extract.ts`.** The plan's three-module split separates "the API gave us JSON" from "recover JSON from prose", but the only real distinction is a nullable input, and `repair.ts` needs both in one control flow anyway. Three files for one state machine made the ordering harder to see, not easier.
+- **`ParseStrategy` widened from four values to six.** The plan had one "extracted" value. Collapsing direct/fenced/prose-recovered into a single label destroys exactly the signal Phase 7 needs to compare models on: a model that returns clean JSON and one that returns JSON inside a fence in a paragraph are different behaviours, and the difference is invisible once both are "extracted".
+- **`describeSchema()` shows a concrete example, not placeholders.** The first implementation used bare `<placeholder>` tokens, which is *invalid JSON*. In `PROMPT_JSON` mode nothing enforces the shape, so a prompt teaching invalid JSON costs a repair request from 50/day on every such response. A test now parses the string and fails if it does not parse.
+- **Issues are reported as `findings[1].severity`, not Zod 4's `findings.1.severity`.** These paths are quoted back at the model in the repair prompt. A small model reasoning about JS accessor syntax gets there faster than one reasoning about dotted-index syntax, and may not get there at all.
+- **Prose that is not JSON is reported as *unparseable*, not as a schema failure.** `jsonrepair` will wrap bare prose into a JSON string, so "I found no issues" parsed successfully and was reported as a shape error. The repair prompt then told the model to fix field shapes it never emitted. Extraction now only accepts objects and arrays.
+
+Wiring: `run.ts` sends the first real requests. Chunks are reviewed through the scheduler, responses are parsed and schema-validated, and findings are collected — but **nothing is anchored or published yet**, so the run ends at `skipped_publisher_not_implemented`. An unanchored finding has no safe destination; Phase 6 gives it one.
 
 ### Phase 6 — Validation, dedupe, publisher (1.5 days)
 `pipeline/{validate,dedupe,stale}.ts`, `output/{comment,suggestion,summary}.ts`, `github/publish.ts`.
@@ -746,6 +758,16 @@ Author **Stage A (14)** + `validate:fixtures`; `eval/{run,score}.ts` + `threshol
 ### Phase 8 — Hardening, docs, release (1.5 days)
 Security review; secret/log audit with the seeded-secret test; rate-limit stress (30 synthetic PRs against the mock, assert ≤ 8 requests); stale-commit stress; `verify-models.yml`; `README.md` / `SECURITY.md` / `LICENSE`; `release.yml`; marketplace metadata.
 **Exit:** every §15 item demonstrably true; a tagged release installs and runs from a clean consumer repo.
+
+#### Phase 8 additions — endpoint privacy (deferred from Phase 4, agreed 2026-09-28)
+
+Two items that close or narrow the runtime-verification gap documented in §1 item 2. Both are maintenance-time, not code-path.
+
+**8a. Populate `privacyVerifiedOn` for every enabled model.** The field exists (`ModelDefinition.privacyVerifiedOn`) and is currently set on **zero** models, which makes `privacyEligible: true` an undated assertion — a fresh check is indistinguishable from a two-year-old one. This also makes SECURITY.md's "with the verification date recorded" true, which it currently is not. Procedure per model: open the OpenRouter model page, identify which provider actually serves the free tier, read that provider's retention terms, record the date. Any model whose provider trains or logs on free usage becomes `privacyEligible: false, enabled: false`, matching the existing Laguna and Inkling treatment.
+
+**8b. `provider.only` allowlist in strict mode.** An optional `strict_providers` input pinning `provider.only` to manually verified providers, so OpenRouter cannot route to a provider attached to a model after verification. Costs model availability; at 50 requests/day that is the right trade, and it is the only enforcement tightening available that needs no management key.
+
+**Explicitly rejected:** a Management API Key. It would unlock the endpoint metadata APIs, but OpenRouter documents that management keys **cannot** call the completion endpoints, so the action would need two secrets — and a management key can list, create, and delete every key on the account. Trading an inference-only credential for an account-admin one to improve a log assertion is a bad trade for a project premised on spending $0 and leaking nothing. The gap stays documented in SECURITY.md instead.
 
 ---
 
@@ -785,6 +807,7 @@ All of `docs/plan.md` §38, plus:
 - [ ] Seeded-secret test: no fixture secret in any log, summary, or comment
 - [ ] `check:dist` in CI; `dist/` committed and verified
 - [ ] Weekly `verify-models.yml` drift check exists
+- [ ] `privacyVerifiedOn` set on every enabled model; `strict_providers` allowlist implemented
 - [ ] README states quota expectation, privacy posture, and that findings are advisory
 - [ ] 32 golden fixtures across 26 categories with a held-out split; held-out gate met
 - [ ] `npm run validate:fixtures` green

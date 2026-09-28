@@ -22,6 +22,7 @@ import { HttpResponse, http } from "msw";
 import { setupServer } from "msw/node";
 import { afterAll, afterEach, beforeAll, describe, expect, it } from "vitest";
 import { run } from "../../src/run.js";
+import type { PrFile } from "../../src/github/pr.js";
 import { CHAT_COMPLETIONS_URL, KEY_URL, MODELS_URL } from "../../src/llm/client.js";
 import { PROMPT_VERSION, CONFIG_VERSION } from "../../src/prompt/version.js";
 
@@ -163,20 +164,23 @@ const PATCH = [
   "",
 ].join("\n");
 
-function filesPayload() {
-  return [
-    {
-      sha: "blob1",
-      filename: "src/loop.ts",
-      status: "modified",
-      additions: 1,
-      deletions: 1,
-      changes: 2,
-      patch: PATCH,
-      blob_url: `${API}/repos/${OWNER}/${REPO}/blobs/blob1`,
-      raw_url: `https://raw.githubusercontent.com/${OWNER}/${REPO}/feature/src/loop.ts`,
-    },
-  ];
+/** The single-file payload most tests use. */
+function oneFile(): PrFile {
+  return {
+    sha: "blob1",
+    filename: "src/loop.ts",
+    status: "modified",
+    additions: 1,
+    deletions: 1,
+    changes: 2,
+    patch: PATCH,
+    blob_url: `${API}/repos/${OWNER}/${REPO}/blobs/blob1`,
+    raw_url: `https://raw.githubusercontent.com/${OWNER}/${REPO}/feature/src/loop.ts`,
+  };
+}
+
+function filesPayload(): PrFile[] {
+  return [oneFile()];
 }
 
 function catalogPayload(modelId = "qwen/qwen3.8-27b:free") {
@@ -206,9 +210,23 @@ function healthy(): void {
   );
 }
 
-describe("the run reaches the Phase 4 boundary with no request sent", () => {
-  it("probes the catalog and the quota, then stops before spending anything", async () => {
-    healthy();
+/** A healthy upstream plus a chat endpoint that returns one finding. */
+function reviewable(): void {
+  healthy();
+  server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+}
+
+function okChat(content = '{"findings":[]}') {
+  return HttpResponse.json({
+    id: "gen",
+    choices: [{ message: { role: "assistant", content }, finish_reason: "stop" }],
+    usage: { prompt_tokens: 900, completion_tokens: 60, total_tokens: 960 },
+  });
+}
+
+describe("the run reaches the review stage", () => {
+  it("probes the catalog and the quota, then reviews", async () => {
+    reviewable();
     const urls: string[] = [];
     server.events.on("request:start", ({ request }) => urls.push(request.url));
 
@@ -216,8 +234,93 @@ describe("the run reaches the Phase 4 boundary with no request sent", () => {
 
     expect(urls).toContain(MODELS_URL);
     expect(urls).toContain(KEY_URL);
-    // The probes cost nothing against the daily allowance, and the pipeline
-    // stops at the Phase 4 boundary, so nothing has been spent.
+    // The probes cost nothing against the daily allowance, and the run spends
+    // exactly one request for the single chunk this diff produces.
+    expect(chatCalls).toBe(1);
+    expect(outputs.requests_used).toBe("1");
+    expect(outputs.model_used).toBe("qwen/qwen3.8-27b:free");
+  });
+
+  it("sends exactly one request per chunk, not one per file", async () => {
+    // Chunks span multiple files to conserve the 50/day budget, so a 4-file PR
+    // should cost 1 request, not 4.
+    server.use(http.get(PR_PATH, () => HttpResponse.json(prPayload({ changed_files: 4, additions: 8, deletions: 8 }))));
+    server.use(
+      http.get(FILES_PATH, () =>
+        HttpResponse.json(
+          Array.from({ length: 4 }, (_, i) => ({
+            ...oneFile(),
+            sha: `blob${i}`,
+            filename: `src/mod${i}.ts`,
+          })),
+        ),
+      ),
+    );
+    server.use(http.get(MODELS_URL, () => HttpResponse.json(catalogPayload())));
+    server.use(
+      http.get(KEY_URL, () =>
+        HttpResponse.json({
+          data: { is_free_tier: false, free_model_daily_requests: { used: 1, limit: 50, remaining: 49 } },
+        }),
+      ),
+    );
+    server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
+
+    const outputs = await run(env());
+
+    expect(chatCalls).toBe(1);
+    expect(outputs.requests_used).toBe("1");
+    expect(outputs.files_reviewed).toBe("4");
+  });
+
+  it("reports a model that returned nothing as a clean review, not a failure", async () => {
+    // The single most damaging possible lie for this action: reporting
+    // no_findings when the code was never examined. An explicit empty array IS
+    // an examination, so this must be a success.
+    reviewable();
+
+    const outputs = await run(env());
+
+    expect(outputs.status).not.toBe("skipped_upstream_unavailable");
+    expect(outputs.findings_count).toBe("0");
+  });
+
+  it("records a finding the model returned", async () => {
+    healthy();
+    server.use(
+      http.post(CHAT_COMPLETIONS_URL, () =>
+        okChat(
+          JSON.stringify({
+            findings: [
+              {
+                path: "src/loop.ts",
+                buggyCodeQuote: "return values.length - 1;",
+                explanation: "Drops the last element, so the total is always one short.",
+                severity: "warning",
+                suggestedCode: null,
+              },
+            ],
+          }),
+        ),
+      ),
+    );
+
+    const outputs = await run(env());
+
+    expect(outputs.findings_count).toBe("1");
+  });
+
+  it("spends nothing on a PR that produced no reviewable chunks", async () => {
+    server.use(http.get(PR_PATH, () => HttpResponse.json(prPayload())));
+    // A file the filter drops entirely: a lockfile.
+    server.use(
+      http.get(FILES_PATH, () => HttpResponse.json([{ ...oneFile(), filename: "package-lock.json" }])),
+    );
+    server.use(http.get(MODELS_URL, () => HttpResponse.json(catalogPayload())));
+    server.use(http.get(KEY_URL, () => HttpResponse.json({ data: {} })));
+
+    const outputs = await run(env());
+
     expect(chatCalls).toBe(0);
     expect(outputs.requests_used).toBe("0");
   });
@@ -278,13 +381,13 @@ describe("the model must be usable before anything is sent", () => {
         }),
       ),
     );
+    server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
 
     const outputs = await run(env());
 
-    // It got past the eligibility gate, so the status reflects the Phase 4
-    // boundary rather than a model rejection.
-    expect(outputs.status).toBe("skipped_pipeline_not_implemented");
-    expect(chatCalls).toBe(0);
+    // It reviewed, on configured assumptions rather than a verified catalog.
+    expect(chatCalls).toBe(1);
+    expect(outputs.status).not.toBe("skipped_no_eligible_model");
   });
 });
 
@@ -335,11 +438,11 @@ describe("the daily reserve is respected at the pipeline level", () => {
     server.use(http.get(FILES_PATH, () => HttpResponse.json(filesPayload())));
     server.use(http.get(MODELS_URL, () => HttpResponse.json(catalogPayload())));
     server.use(http.get(KEY_URL, () => HttpResponse.error()));
+    server.use(http.post(CHAT_COMPLETIONS_URL, () => okChat()));
 
-    const outputs = await run(env());
+    await run(env());
 
-    expect(outputs.status).toBe("skipped_pipeline_not_implemented");
-    expect(chatCalls).toBe(0);
+    expect(chatCalls).toBe(1);
   });
 });
 
