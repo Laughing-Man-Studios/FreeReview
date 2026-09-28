@@ -30,6 +30,10 @@ jobs:
     # glob would never expand. actionlint's documented default with no
     # arguments is to lint every workflow under .github/workflows.
     steps:
+      # Required. Without it the workspace is empty and actionlint exits with
+      # "no project was found in any parent directories" — a confusing failure
+      # that looks like a misconfiguration rather than a missing step.
+      - uses: actions/checkout@v6
       - uses: docker://rhysd/actionlint:1.7.12
 
   verify:
