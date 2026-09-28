@@ -1,6 +1,10 @@
 version: 2
 
 updates:
+  # All npm dev dependencies are shipped only inside the bundle, never
+  # installed by consumers, so they are grouped into a single reviewable PR.
+  # Grouping also stops a fresh repository opening six separate PRs the moment
+  # it is created.
   - package-ecosystem: npm
     directory: "/"
     schedule:
@@ -10,6 +14,25 @@ updates:
       prefix: "chore(deps)"
     labels:
       - dependencies
+    groups:
+      dev-dependencies:
+        patterns:
+          - "*"
+        update-types:
+          - minor
+          - patch
+        # Major bumps are proposed one at a time so a breaking upgrade can be
+        # reviewed on its own. They have broken the build in this project
+        # before (TypeScript 5 -> 7, vitest 3 -> 5), and a green Dependabot
+        # run is not evidence that a major is safe.
+    ignore:
+      # Held back deliberately. Uncomment when a bump is actually tested.
+      # - dependency-name: "typescript"
+      #   versions: [">=7"]
+      # - dependency-name: "vitest"
+      #   versions: [">=5"]
+      # - dependency-name: "@types/node"
+      #   versions: [">=26"]
 
   - package-ecosystem: github-actions
     directory: "/"
@@ -17,3 +40,7 @@ updates:
       interval: weekly
     labels:
       - dependencies
+    groups:
+      actions:
+        patterns:
+          - "*"

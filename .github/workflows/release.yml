@@ -16,8 +16,8 @@ permissions:
 on:
   push:
     branches: [main]
-  # Allows cutting a release from a non-main branch.
-  release_created:
+  # Cut a release from a published GitHub release, if one is created by hand.
+  release:
     types: ["published"]
 
 concurrency:
@@ -27,6 +27,12 @@ concurrency:
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    # Re-exported so the verification job below can consume them. Cross-job
+    # values come from `needs.<job>.outputs`, never from `steps` — `steps` is
+    # scoped to the job that declared them.
+    outputs:
+      tag_created: ${{ steps.release.outputs.tag_created }}
+      tag_name: ${{ steps.release.outputs.tag_name }}
     steps:
       - uses: googleapis/release-please-action@v4
         id: release
@@ -41,14 +47,14 @@ jobs:
   # bundle that drifted from src/.
   verify-release-artifact:
     needs: release-please
-    if: steps.release.outputs.tag_created == 'true'
+    if: needs.release-please.outputs.tag_created == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ steps.release.outputs.tag_name }}
+          ref: ${{ needs.release-please.outputs.tag_name }}
       - uses: actions/setup-node@v6
         with:
           node-version: "24"

@@ -17,6 +17,17 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  workflow-lint:
+    name: workflow lint
+    runs-on: ubuntu-latest
+    # A malformed workflow fails at 0s with zero jobs, which produces a red X
+    # and no diagnostic at all. This catches that before merge.
+    # Invoked as a Docker image so no third-party JavaScript is executed.
+    steps:
+      - uses: docker://rhysd/actionlint:1.7.12
+        with:
+          args: -color .github/workflows/*.yml
+
   verify:
     name: typecheck, lint, test, build, dist integrity
     runs-on: ubuntu-latest
