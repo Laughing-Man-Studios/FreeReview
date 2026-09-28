@@ -14,6 +14,19 @@ under `Anchoring`, and `feat(publisher): ...` produces a minor bump.
 > Marketplace**. Phases 1 and 2 of 8 are complete; the review pipeline does not
 > yet run. See [`docs/execution-plan.md`](docs/execution-plan.md).
 
+## [0.1.1](https://github.com/Laughing-Man-Studios/FreeReview/compare/v0.1.0...v0.1.1) (2026-09-28)
+
+
+### Fixed
+
+* **release:** repair release workflow, add actionlint to CI ([4358b40](https://github.com/Laughing-Man-Studios/FreeReview/commit/4358b40cf737825174914fa84314419aa66a0948))
+
+
+### Miscellaneous
+
+* **release:** add release-please version manifest ([4bc85e0](https://github.com/Laughing-Man-Studios/FreeReview/commit/4bc85e0aec90493c0ae3b99c330752706062b3e9))
+* repository hygiene for public distribution ([7c01c38](https://github.com/Laughing-Man-Studios/FreeReview/commit/7c01c38fa747069ca658e4b4afd94b1c8a5a83c3))
+
 ## [Unreleased]
 
 ### Added
