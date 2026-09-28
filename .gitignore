@@ -1,0 +1,13 @@
+node_modules/
+
+# NOTE: dist/ is deliberately NOT ignored. GitHub Actions executes the
+# committed bundle directly; there is no install or build step on the consumer's
+# runner. `npm run check:dist` in CI fails the build if it drifts from src/.
+
+eval/runs/
+*.log
+.DS_Store
+.env
+.env.*
+!.env.example
+coverage/

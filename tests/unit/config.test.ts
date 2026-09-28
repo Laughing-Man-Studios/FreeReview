@@ -1,0 +1,403 @@
+import { describe, expect, it } from "vitest";
+import {
+  DEFAULT_MODELS,
+  ConfigError,
+  capabilityModeFor,
+  eligibleModels,
+  loadConfig,
+  validateConfig,
+  type Config,
+  type ModelDefinition,
+} from "../../src/config.js";
+import { FREE_MODEL_ID_PATTERN, assertFreeModelId } from "../../src/config.js";
+
+/** Minimal valid env; overridden per test. */
+function env(overrides: Record<string, string> = {}): NodeJS.ProcessEnv {
+  return { INPUT_OPENROUTER_API_KEY: "sk-test-not-a-real-key", ...overrides };
+}
+
+function model(overrides: Partial<ModelDefinition> = {}): ModelDefinition {
+  return {
+    id: "qwen/qwen3.8-27b:free",
+    enabled: true,
+    priority: 0,
+    maxContextTokens: 262_144,
+    supportsResponseFormat: true,
+    supportsJsonSchema: true,
+    privacyEligible: true,
+    ...overrides,
+  };
+}
+
+function config(overrides: Partial<Config> = {}): Config {
+  return { ...loadConfig(env()), ...overrides };
+}
+
+describe("FREE_MODEL_ID_PATTERN (guard 1 of 3 against paid routing)", () => {
+  it.each([
+    "qwen/qwen3.8-27b:free",
+    "google/gemma-4-31b-it:free",
+    "nvidia/nemotron-3-super-120b-a12b:free",
+    "dots-studio/dots-3-note-preview:free",
+    "vendor/model_v1.2-rc.3:free",
+  ])("accepts %s", (id) => {
+    expect(FREE_MODEL_ID_PATTERN.test(id)).toBe(true);
+    expect(() => assertFreeModelId(id, "primary_model")).not.toThrow();
+  });
+
+  it.each([
+    // The exact substitution the plan forbids: dropping :free silently
+    // converts a $0 endpoint into a paid one.
+    ["qwen/qwen3.8-27b", "paid variant of a free model"],
+    ["openai/gpt-4o", "paid model"],
+    ["openrouter/free", "free router (not reproducible)"],
+    ["openrouter/auto", "auto router"],
+    ["Qwen/Qwen3.8-27B:free", "uppercase (OpenRouter IDs are lowercase)"],
+    ["qwen/qwen3.8-27b:free:extra", "suffix after :free"],
+    ["qwen/qwen3.8-27b:paid", "wrong suffix"],
+    ["qwen", "missing author prefix"],
+    [":free", "missing slug"],
+    ["qwen/", "missing slug"],
+    ["/qwen3.8-27b:free", "missing author"],
+    ["", "empty"],
+    ["qwen/qwen3.8 27b:free", "space in slug"],
+  ])("rejects %s (%s)", (id) => {
+    expect(FREE_MODEL_ID_PATTERN.test(id)).toBe(false);
+    expect(() => assertFreeModelId(id, "primary_model")).toThrow(ConfigError);
+  });
+
+  it("names the input in the error", () => {
+    expect(() => assertFreeModelId("openai/gpt-4o", "fallback_models")).toThrow(/fallback_models/);
+  });
+
+  it("the error message states the action never routes to a paid model", () => {
+    expect(() => assertFreeModelId("openai/gpt-4o", "primary_model")).toThrow(
+      /never routes to a paid model/i,
+    );
+  });
+});
+
+describe("loadConfig — required input", () => {
+  it("throws CONFIG_INVALID naming openrouter_api_key when missing", () => {
+    expect(() => loadConfig({})).toThrow(ConfigError);
+    try {
+      loadConfig({});
+      expect.unreachable();
+    } catch (error) {
+      expect(error).toBeInstanceOf(ConfigError);
+      expect((error as ConfigError).input).toBe("openrouter_api_key");
+    }
+  });
+
+  it("treats a whitespace-only key as missing", () => {
+    expect(() => loadConfig({ INPUT_OPENROUTER_API_KEY: "   " })).toThrow(/openrouter_api_key/);
+  });
+
+  it("does not echo the key value in the error message", () => {
+    try {
+      loadConfig({ INPUT_OPENROUTER_API_KEY: "sk-abcdef0123456789abcdef" });
+    } catch {
+      // no throw expected
+    }
+    // Missing-key error must not contain any key material.
+    try {
+      loadConfig({});
+      expect.unreachable();
+    } catch (error) {
+      expect((error as Error).message).not.toMatch(/sk-/);
+    }
+  });
+});
+
+describe("loadConfig — numeric inputs", () => {
+  it.each([
+    ["max_input_tokens", "0", "below min"],
+    ["max_input_tokens", "abc", "not an integer"],
+    ["max_input_tokens", "12abc", "trailing garbage"],
+    ["max_input_tokens", "1e5", "exponent notation"],
+    ["max_input_tokens", "0x10", "hex notation"],
+    ["max_input_tokens", "999999", "above max"],
+    ["max_output_tokens", "-1", "negative"],
+    ["max_changed_lines", "0", "below min"],
+    ["max_requests_per_run", "0", "below min"],
+    ["max_requests_per_run", "51", "above max"],
+    ["max_concurrency", "5", "above the hard cap of 4"],
+    ["max_findings_per_chunk", "0", "below min"],
+    ["max_findings_per_chunk", "21", "above max"],
+  ])("%s rejects '%s' (%s)", (name, value) => {
+    expect(() => loadConfig(env({ [`INPUT_${name.toUpperCase()}`]: value }))).toThrow(ConfigError);
+  });
+
+  it("accepts values at the exact bounds", () => {
+    const c = loadConfig(
+      env({
+        INPUT_MAX_INPUT_TOKENS: "1000",
+        INPUT_MAX_OUTPUT_TOKENS: "256",
+        INPUT_MAX_CHANGED_LINES: "1",
+        INPUT_MAX_REQUESTS_PER_RUN: "1",
+        INPUT_MAX_CONCURRENCY: "1",
+        INPUT_MAX_FINDINGS_PER_CHUNK: "1",
+      }),
+    );
+    expect(c.maxInputTokens).toBe(1000);
+    expect(c.maxOutputTokens).toBe(256);
+    expect(c.maxChangedLines).toBe(1);
+    expect(c.maxRequestsPerRun).toBe(1);
+    expect(c.maxConcurrency).toBe(1);
+    expect(c.maxFindingsPerChunk).toBe(1);
+  });
+
+  it("applies documented defaults when inputs are absent", () => {
+    const c = loadConfig(env());
+    expect(c.maxChangedLines).toBe(2000);
+    expect(c.maxInputTokens).toBe(24000);
+    expect(c.maxOutputTokens).toBe(1500);
+    expect(c.maxRequestsPerRun).toBe(8);
+    expect(c.maxConcurrency).toBe(2);
+    expect(c.maxFindingsPerChunk).toBe(5);
+    expect(c.privacyMode).toBe("strict");
+    expect(c.includeSuggestions).toBe(false);
+    expect(c.debugPayloads).toBe(false);
+  });
+
+  it("keeps requests-per-minute under OpenRouter's 20 RPM free cap", () => {
+    expect(loadConfig(env()).maxRequestsPerMinute).toBeLessThan(20);
+  });
+});
+
+describe("loadConfig — boolean inputs", () => {
+  it.each([
+    ["true", true],
+    ["TRUE", true],
+    ["yes", true],
+    ["1", true],
+    ["on", true],
+    ["false", false],
+    ["no", false],
+    ["0", false],
+    ["off", false],
+  ])("include_suggestions='%s' -> %s", (value, expected) => {
+    expect(loadConfig(env({ INPUT_INCLUDE_SUGGESTIONS: value })).includeSuggestions).toBe(expected);
+  });
+
+  it.each(["maybe", "2", "t", "y"])("rejects non-boolean '%s'", (value) => {
+    expect(() => loadConfig(env({ INPUT_INCLUDE_SUGGESTIONS: value }))).toThrow(ConfigError);
+  });
+});
+
+describe("loadConfig — privacy_mode", () => {
+  it("defaults to strict", () => {
+    expect(loadConfig(env()).privacyMode).toBe("strict");
+  });
+
+  it.each(["strict", "relaxed", "STRICT", "Relaxed"])("accepts '%s'", (value) => {
+    expect(["strict", "relaxed"]).toContain(
+      loadConfig(env({ INPUT_PRIVACY_MODE: value })).privacyMode,
+    );
+  });
+
+  it.each(["off", "none", "permissive", "STRICTLY_RELAXED", "true"])(
+    "rejects '%s'",
+    (value) => {
+      expect(() => loadConfig(env({ INPUT_PRIVACY_MODE: value }))).toThrow(ConfigError);
+    },
+  );
+
+  it("treats an empty value as unset and falls back to strict", () => {
+    // An empty input is indistinguishable from an absent one, so it must
+    // resolve to the safe default rather than to relaxed.
+    expect(loadConfig(env({ INPUT_PRIVACY_MODE: "" })).privacyMode).toBe("strict");
+    expect(loadConfig(env({ INPUT_PRIVACY_MODE: "   " })).privacyMode).toBe("strict");
+  });
+});
+
+describe("loadConfig — model configuration", () => {
+  it("uses DEFAULT_MODELS when no model input is given", () => {
+    const c = loadConfig(env());
+    expect(c.models).toHaveLength(DEFAULT_MODELS.length);
+    expect(c.models[0]?.id).toBe("qwen/qwen3.8-27b:free");
+  });
+
+  it("every default model is a valid free ID", () => {
+    for (const m of DEFAULT_MODELS) {
+      expect(FREE_MODEL_ID_PATTERN.test(m.id), `${m.id} must be a :free ID`).toBe(true);
+    }
+  });
+
+  it("rejects a non-:free primary model", () => {
+    expect(() => loadConfig(env({ INPUT_PRIMARY_MODEL: "openai/gpt-4o" }))).toThrow(ConfigError);
+  });
+
+  it("rejects a non-:free entry in fallback_models", () => {
+    expect(() =>
+      loadConfig(env({ INPUT_FALLBACK_MODELS: "google/gemma-4-31b-it:free,openai/gpt-4o" })),
+    ).toThrow(/fallback_models/);
+  });
+
+  it("accepts a comma-separated fallback list with whitespace", () => {
+    const c = loadConfig(
+      env({ INPUT_FALLBACK_MODELS: " google/gemma-4-31b-it:free , liquid/lfm-2.5-2.6b:free " }),
+    );
+    expect(c.models.map((m) => m.id)).toEqual([
+      "qwen/qwen3.8-27b:free",
+      "google/gemma-4-31b-it:free",
+      "liquid/lfm-2.5-2.6b:free",
+    ]);
+  });
+
+  it("ignores empty segments in fallback_models", () => {
+    const c = loadConfig(env({ INPUT_FALLBACK_MODELS: "a/b:free,,c/d:free," }));
+    expect(c.models).toHaveLength(3);
+  });
+
+  it("inherits known capabilities from DEFAULT_MODELS", () => {
+    const c = loadConfig(env({ INPUT_FALLBACK_MODELS: "google/gemma-4-31b-it:free" }));
+    const fallback = c.models[1];
+    expect(fallback?.supportsJsonSchema).toBe(false);
+    expect(fallback?.supportsResponseFormat).toBe(true);
+  });
+
+  it("rejects duplicate models", () => {
+    expect(() =>
+      loadConfig(env({ INPUT_FALLBACK_MODELS: "qwen/qwen3.8-27b:free,liquid/lfm-2.5-2.6b:free" })),
+    ).toThrow(/Duplicate/);
+  });
+
+  it("rejects an empty model pool", () => {
+    expect(() => validateConfig(config({ models: [] }))).toThrow(/At least one model/);
+  });
+});
+
+describe("validateConfig — context window arithmetic", () => {
+  it("rejects budgets that exceed a model's declared context window", () => {
+    expect(() =>
+      validateConfig(
+        config({
+          maxInputTokens: 24_000,
+          maxOutputTokens: 1_500,
+          models: [model({ maxContextTokens: 10_000 })],
+        }),
+      ),
+    ).toThrow(/context window/);
+  });
+
+  it("accepts budgets that exactly fit the context window", () => {
+    expect(() =>
+      validateConfig(
+        config({
+          maxInputTokens: 8_500,
+          maxOutputTokens: 1_500,
+          models: [model({ maxContextTokens: 10_000 })],
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("skips the check for models whose window is unknown until the catalog probe", () => {
+    expect(() =>
+      validateConfig(
+        config({
+          maxInputTokens: 24_000,
+          maxOutputTokens: 1_500,
+          models: [model({ maxContextTokens: null })],
+        }),
+      ),
+    ).not.toThrow();
+  });
+
+  it("every default model's window accommodates the default budgets", () => {
+    for (const m of DEFAULT_MODELS) {
+      if (m.maxContextTokens === null) continue;
+      expect(
+        m.maxContextTokens,
+        `${m.id} window too small for 24000+1500`,
+      ).toBeGreaterThanOrEqual(24_000 + 1_500);
+    }
+  });
+});
+
+describe("eligibleModels — privacy filtering", () => {
+  it("strict mode excludes models flagged not privacy-eligible", () => {
+    const c = config({
+      privacyMode: "strict",
+      models: [
+        model({ id: "qwen/qwen3.8-27b:free", priority: 0, privacyEligible: true }),
+        model({ id: "poolside/laguna-s-2.1:free", priority: 1, privacyEligible: false }),
+        model({ id: "thinkingmachines/inkling-small:free", priority: 2, privacyEligible: false }),
+      ],
+    });
+    expect(eligibleModels(c).map((m) => m.id)).toEqual(["qwen/qwen3.8-27b:free"]);
+  });
+
+  it("relaxed mode includes every enabled model", () => {
+    const c = config({
+      privacyMode: "relaxed",
+      models: [
+        model({ id: "qwen/qwen3.8-27b:free", priority: 0, privacyEligible: true }),
+        model({ id: "poolside/laguna-s-2.1:free", priority: 1, privacyEligible: false }),
+      ],
+    });
+    expect(eligibleModels(c).map((m) => m.id)).toEqual([
+      "qwen/qwen3.8-27b:free",
+      "poolside/laguna-s-2.1:free",
+    ]);
+  });
+
+  it("excludes disabled models in both modes", () => {
+    const c = config({
+      privacyMode: "relaxed",
+      models: [
+        model({ id: "qwen/qwen3.8-27b:free", priority: 0 }),
+        model({ id: "poolside/laguna-s-2.1:free", priority: 1, enabled: false }),
+      ],
+    });
+    expect(eligibleModels(c).map((m) => m.id)).toEqual(["qwen/qwen3.8-27b:free"]);
+  });
+
+  it("orders by priority, not declaration order", () => {
+    const c = config({
+      models: [
+        model({ id: "liquid/lfm-2.5-2.6b:free", priority: 5 }),
+        model({ id: "qwen/qwen3.8-27b:free", priority: 0 }),
+        model({ id: "nvidia/nemotron-3-super-120b-a12b:free", priority: 2 }),
+      ],
+    });
+    expect(eligibleModels(c).map((m) => m.priority)).toEqual([0, 2, 5]);
+  });
+
+  it("the default pool in strict mode yields at least three usable models", () => {
+    // A pool that collapses to one model under strict privacy is fragile: the
+    // free catalog churns and a single model disappearing disables the action.
+    expect(eligibleModels(loadConfig(env())).length).toBeGreaterThanOrEqual(3);
+  });
+});
+
+describe("capabilityModeFor", () => {
+  it("STRUCTURED when the model declares json schema support", () => {
+    expect(capabilityModeFor(model({ supportsJsonSchema: true }))).toBe("STRUCTURED");
+  });
+
+  it("JSON_OBJECT when the model has response_format but not structured_outputs", () => {
+    // This is the Gemma-4 free case: it would 503 under
+    // require_parameters:true with json_schema.
+    expect(
+      capabilityModeFor(
+        model({ supportsJsonSchema: false, supportsResponseFormat: true }),
+      ),
+    ).toBe("JSON_OBJECT");
+  });
+
+  it("PROMPT_JSON when the model declares no response_format", () => {
+    expect(
+      capabilityModeFor(model({ supportsJsonSchema: false, supportsResponseFormat: false })),
+    ).toBe("PROMPT_JSON");
+  });
+
+  it("PROMPT_JSON when capabilities are unknown (least demanding shape)", () => {
+    expect(
+      capabilityModeFor(
+        model({ supportsJsonSchema: null, supportsResponseFormat: null, maxContextTokens: null }),
+      ),
+    ).toBe("PROMPT_JSON");
+  });
+});

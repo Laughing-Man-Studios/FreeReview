@@ -1,0 +1,87 @@
+name: "FreeReview"
+description: "Advisory AI code review for pull requests, using only $0 OpenRouter free-model endpoints. Never approves, blocks, or fails a build."
+author: "Rogibb111"
+
+branding:
+  icon: "eye"
+  color: "purple"
+
+inputs:
+  openrouter_api_key:
+    description: "OpenRouter API key. Only ever read from the environment; never logged."
+    required: true
+
+  privacy_mode:
+    description: "'strict' (default) sends provider.zdr=true and provider.data_collection='deny'. 'relaxed' drops both constraints and is loudly reported in the step summary and the published review."
+    required: false
+    default: "strict"
+
+  primary_model:
+    description: "Explicit ':free' OpenRouter model ID. Defaults to the bundled primary. Non-':free' IDs are rejected before any network call."
+    required: false
+    default: ""
+
+  fallback_models:
+    description: "Comma-separated ':free' model IDs to try, in order, when the primary is unavailable."
+    required: false
+    default: ""
+
+  max_changed_lines:
+    description: "Skip AI review (non-blocking) if the PR exceeds this many changed lines."
+    required: false
+    default: "2000"
+
+  max_input_tokens:
+    description: "Hard per-request input token budget. Chunks are packed to fit this."
+    required: false
+    default: "24000"
+
+  max_output_tokens:
+    description: "Output token budget reserved for the structured response. Counts against the model's context window."
+    required: false
+    default: "1500"
+
+  max_requests_per_run:
+    description: "Hard cap on OpenRouter requests for one run, including retries and fallbacks. Default 8 keeps a worst-case PR at ~6 reviews/day against the 50/day free allowance."
+    required: false
+    default: "8"
+
+  max_concurrency:
+    description: "Concurrent OpenRouter requests. Capped at 4."
+    required: false
+    default: "2"
+
+  max_findings_per_chunk:
+    description: "Maximum findings accepted from a single chunk."
+    required: false
+    default: "5"
+
+  include_suggestions:
+    description: "Attach GitHub ```suggestion blocks. Off by default: prove the findings are useful before optimising patches."
+    required: false
+    default: "false"
+
+  debug_payloads:
+    description: "Log full prompt bodies and model responses. WARNING: this exposes proprietary source code in workflow logs."
+    required: false
+    default: "false"
+
+outputs:
+  status:
+    description: "reviewed | no_findings | skipped_<reason> | failed"
+  findings_count:
+    description: "Number of inline findings published."
+  unanchored_count:
+    description: "Number of model findings that could not be uniquely anchored and were therefore not published inline."
+  files_reviewed:
+    description: "Number of files included in model context."
+  model_used:
+    description: "Model that produced the published findings, or empty."
+  requests_used:
+    description: "OpenRouter requests spent, including retries and fallbacks."
+  review_url:
+    description: "URL of the published review, or empty."
+
+runs:
+  using: "node24"
+  main: "dist/index.js"

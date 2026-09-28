@@ -1,0 +1,36 @@
+{
+  "name": "freereview",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Advisory AI code review for pull requests, using only $0 OpenRouter free-model endpoints.",
+  "engines": {
+    "node": ">=24"
+  },
+  "scripts": {
+    "build": "tsup",
+    "check:dist": "node scripts/check-dist.mjs",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run",
+    "test:unit": "vitest run tests/unit",
+    "test:property": "vitest run --passWithNoTests tests/property",
+    "test:integration": "vitest run --passWithNoTests tests/integration",
+    "test:security": "vitest run tests/security",
+    "validate:fixtures": "tsx eval/validate-fixtures.ts",
+    "eval": "tsx eval/run.ts"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.20.0",
+    "@types/node": "^24.0.0",
+    "eslint": "^9.20.0",
+    "fast-check": "^4.0.0",
+    "jsonrepair": "^3.10.0",
+    "msw": "^2.7.0",
+    "tsup": "^8.3.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.7.0",
+    "typescript-eslint": "^8.24.0",
+    "vitest": "^3.0.0",
+    "zod": "^4.0.0"
+  }
+}

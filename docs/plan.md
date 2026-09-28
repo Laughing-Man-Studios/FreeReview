@@ -1,5 +1,44 @@
 # Plan: Zero-Cost OpenRouter GitHub Action for Advisory PR Reviews
 
+> **Status:** Design record. Superseded for implementation purposes by
+> [`docs/execution-plan.md`](./execution-plan.md).
+>
+> This document remains the authoritative statement of *intent and rationale* —
+> in particular §5 (architectural principles), §24 (why there is no persistent
+> caching), and §41 (the LLM-proposes/local-code-disposes separation). Do not
+> delete it; the reasoning here is what the implementation is defending.
+>
+> **Known divergences** in the execution plan, each verified against live APIs on
+> 2026-09-27. This document predates them and is wrong on these points:
+>
+> 1. **§16.3 finding schema is missing `path`.** The execution plan adds it as a
+>    required field. Without it, findings in multi-file chunks cannot be
+>    attributed to a file, and the §19 validation step "path belongs to PR"
+>    refers to a field the model is never asked to return.
+> 2. **§4's endpoint-privacy verification is not implementable at runtime.**
+>    `GET /api/v1/models/{author}/{slug}/endpoints` and `GET /api/v1/endpoints/zdr`
+>    both return 403 "Only management keys can perform this operation". Privacy
+>    is enforced per-request via `provider.zdr` / `provider.data_collection` and
+>    detected from the resulting 503/404; endpoint verification becomes a
+>    documented maintenance-time manual check.
+> 3. **§4/§15's free-model catalog is stale.** Live catalog and per-model
+>    capability flags differ; notably the Gemma-4 free models expose
+>    `response_format` but not `structured_outputs`, so they cannot be used with
+>    `json_schema` under `require_parameters: true`.
+> 4. **§31 lacks a hard $0 control.** `provider.max_price: {prompt:"0",
+>    completion:"0", request:"0"}` is an enforced filter, not a convention, and
+>    is adopted as one of three independent paid-routing guards.
+> 5. **§14/§17 underspecify error handling.** OpenRouter's stable
+>    `error.metadata.error_type` vocabulary replaces status-code heuristics, and
+>    the fact that a non-streaming HTTP 200 can carry an error body is unhandled.
+>
+> **Additions** present in the execution plan but absent here: a quota preflight
+> via `GET /api/v1/key`; router-metadata audit of the serving provider; a
+> request-cost model under the 50/day budget; prompt-injection hardening in the
+> diff *rendering* layer rather than the system prompt alone; a context-only
+> anchor rejection; property-based tests on the anchoring invariant; and a
+> weekly model-catalog drift check.
+
 ## 1. Purpose
 
 Build a native TypeScript GitHub Action that performs **advisory AI code reviews** on pull requests using only **$0 OpenRouter free-model endpoints**.
