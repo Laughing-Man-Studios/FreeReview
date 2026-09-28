@@ -43,9 +43,12 @@ const EXECUTION_CAPABILITIES: ReadonlyArray<readonly [string, RegExp]> = [
   ["child_process import", /\brequire\(\s*["']node:child_process["']\s*\)/],
   ["child_process import (bare)", /\brequire\(\s*["']child_process["']\s*\)/],
   ["dynamic import of child_process", /\bimport\(\s*["']node:child_process["']\s*\)/],
-  ["exec / execSync", /\bexec(?:File|Sync)?\s*\(/],
+  // NB: these deliberately exclude `exec`, because `RegExp.prototype.exec` is
+  // the built-in string matcher and appears in the diff parser and the
+  // injection normaliser. The risky forms are the child_process ones, which are
+  // matched by their import instead — asserting the import is absent is both
+  // precise and not fooled by a method name.
   ["spawn / spawnSync", /\bspawn(?:Sync)?\s*\(/],
-  ["execFile", /\bexecFile(?:Sync)?\s*\(/],
   ["fork", /\bfork\s*\(/],
   ["eval", /\beval\s*\(/],
   ["Function constructor", /\bnew\s+Function\s*\(/],
@@ -92,6 +95,13 @@ describe("shipped bundle has no code-execution capability", () => {
     expect(bundle).not.toMatch(/\bunlink(?:Sync)?\s*\(/);
     expect(bundle).not.toMatch(/\brename(?:Sync)?\s*\(/);
     expect(bundle).not.toMatch(/\bcp(?:Sync)?\s*\(/);
+  });
+
+  it("does not spawn or exec a shell through any indirect path", () => {
+    // Belt-and-braces: even if a future refactor dropped the direct import, a
+    // global process accessor would reintroduce the capability.
+    expect(bundle).not.toMatch(/\bprocess\s*\.\s*binding\b/);
+    expect(bundle).not.toMatch(/\brequire\s*\(\s*["']node:vm["']\s*\)/);
   });
 
   it("does not reference actions/checkout or any git executable", () => {

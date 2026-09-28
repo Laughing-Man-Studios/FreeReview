@@ -314,7 +314,12 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
     ];
   }
 
-  const maxInputTokens = readInt(env, "max_input_tokens", 24_000, { min: 1_000, max: 400_000 });
+  // The floor is 2000 rather than something smaller because the estimator
+  // reserves REQUEST_OVERHEAD_TOKENS + PER_CHUNK_SCAFFOLD_TOKENS (1300) before
+  // any diff content. Below that the content budget would hit its floor and the
+  // total would exceed the configured maximum, which makes the budget
+  // guarantee meaningless. 2000 leaves 700 tokens of usable content.
+  const maxInputTokens = readInt(env, "max_input_tokens", 24_000, { min: 2_000, max: 400_000 });
   const maxOutputTokens = readInt(env, "max_output_tokens", 1_500, { min: 256, max: 32_000 });
   const maxChangedLines = readInt(env, "max_changed_lines", 2_000, { min: 1, max: 100_000 });
 

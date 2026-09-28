@@ -15,9 +15,39 @@ import { ConfigError, debugPayloadsFromEnv, loadConfig, type Config } from "./co
 import { createLogger, type Diagnostic, type DiagnosticCode, type Logger } from "./diagnostics.js";
 import { GithubClient, GithubError } from "./github/client.js";
 import { parseEventContext } from "./github/context.js";
-import { getPullRequest, listPullRequestFiles } from "./github/pr.js";
+import { getPullRequest, listPullRequestFiles, type PrFile } from "./github/pr.js";
+import { renderChunk } from "./diff/render.js";
+import { parseUnifiedDiff } from "./diff/parse.js";
+import { buildChunks, chunkStats } from "./pipeline/chunk.js";
+import { filterFiles } from "./pipeline/filter.js";
+import { checkChangedLines, checkChunkBudgets, selectAffordableChunks } from "./pipeline/size-gate.js";
+import { estimatorFromConfig } from "./pipeline/tokens.js";
 import { evaluateEligibility, type EligibilityResult } from "./pipeline/eligibility.js";
 import { CONFIG_VERSION, PROMPT_VERSION } from "./prompt/version.js";
+import type { DiffFile, FileStatus } from "./types.js";
+
+/**
+ * Map GitHub's file status onto the parser's vocabulary.
+ *
+ * GitHub reports `removed` where the diff vocabulary says `deleted`, and adds
+ * `changed`/`unchanged`, which are not file statuses at all. Anything
+ * unrecognised is treated as `modified` rather than rejected, because a new
+ * status value should not stop a review.
+ */
+function normaliseFileStatus(status: PrFile["status"]): FileStatus {
+  switch (status) {
+    case "added":
+      return "added";
+    case "removed":
+      return "deleted";
+    case "renamed":
+      return "renamed";
+    case "copied":
+      return "copied";
+    default:
+      return "modified";
+  }
+}
 
 export type RunStatus =
   | "reviewed"
@@ -334,12 +364,162 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     return finish(logger, baseOutputs(), "skipped_early_exit");
   }
 
-  // Phase 1 stops here. Diff parsing is Phase 2, context construction Phase 3.
-  // The retrieval path is exercised now so pagination and truncation flags are
-  // proven before anything depends on them.
+  // --- 7. Coarse size gate ------------------------------------------------
+  // Rejected before any parsing, because it is the cheap decision and its only
+  // job is to avoid spending quota on a PR that could never produce a useful
+  // review.
+  const sizeGate = checkChangedLines({
+    totalChangedLines,
+    maxChangedLines: config.maxChangedLines,
+    filesConsidered: changedFileCount,
+  });
+  if (!sizeGate.ok) {
+    logger.record(sizeGate.diagnostic);
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+
+  // --- 8. Parse every available patch ------------------------------------
+  // One file that fails to parse is skipped rather than failing the run, and
+  // reported as a coverage gap. A single corrupt patch from GitHub should not
+  // prevent review of the other 39 files.
+  const estimator = estimatorFromConfig(config);
+  const parsed: DiffFile[] = [];
+  let parseFailures = 0;
+
+  for (const entry of files) {
+    if (entry.patch === undefined) continue;
+    try {
+      parsed.push(
+        parseUnifiedDiff(entry.patch, {
+          path: entry.filename,
+          status: normaliseFileStatus(entry.status),
+          ...(entry.previous_filename === undefined
+            ? {}
+            : { previousPath: entry.previous_filename }),
+        }),
+      );
+    } catch (error) {
+      parseFailures += 1;
+      logger.debug("could not parse a file's patch", {
+        path: entry.filename,
+        reason: error instanceof Error ? error.message.slice(0, 120) : "unknown",
+      });
+    }
+  }
+
+  if (parseFailures > 0) {
+    logger.log(
+      "DIFF_PARSE_FAILED",
+      `${parseFailures} file diff(s) could not be parsed and were skipped. ` +
+        "The rest of the pull request was still processed.",
+      { failed: parseFailures, parsed: parsed.length },
+    );
+  }
+
+  // --- 9. Filter and chunk -----------------------------------------------
+  const filtered = filterFiles(parsed, (text) => estimator.text(text));
+
+  for (const change of filtered.dependencyChanges) {
+    logger.annotation(`Dependency change: ${change}`);
+  }
+  for (const gap of filtered.coverageGaps) {
+    logger.log(
+      "DIFF_TRUNCATED",
+      `Not fully reviewed: ${gap.path} — ${gap.detail}`,
+      { path: gap.path },
+    );
+  }
+  logger.debug("files filtered", {
+    included: filtered.included.length,
+    excluded: filtered.excluded.length,
+  });
+
+  if (filtered.included.length === 0) {
+    logger.log(
+      "NO_REVIEWABLE_FILES",
+      changedFileCount > 0
+        ? `None of the ${changedFileCount} changed files contained reviewable source. ` +
+          "This usually means the change is only assets, generated output, or lockfiles."
+        : "The pull request has no changed files to review.",
+      { changed_files: changedFileCount },
+    );
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+
+  const chunks = buildChunks(filtered.included, estimator);
+  const stats = chunkStats(chunks);
+
+  logger.info("review context built", {
+    files: stats.files,
+    chunks: stats.chunks,
+    max_chunk_tokens: stats.maxChunkTokens,
+    budget_tokens: estimator.budgetForChunk(),
+    split_hunks: stats.splitHunks,
+  });
+
+  if (chunks.length === 0) {
+    logger.log(
+      "CONTEXT_TOO_LARGE",
+      "The reviewable diff could not be packed into a single request. " +
+        "Raise max_input_tokens or review a smaller pull request.",
+      { budget_tokens: estimator.budgetForChunk() },
+    );
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+
+  // --- 10. Render and verify the budget ---------------------------------
+  // The renderer adds a banner, fence, and file headers on top of what the
+  // chunker measured, so the check is against the *rendered* cost. This is a
+  // runtime assertion: sending a request we expect to be rejected wastes one of
+  // 50 daily requests.
+  const rendered = chunks.map((chunk) =>
+    renderChunk(
+      chunk,
+      {
+        owner: identity.owner,
+        repo: identity.repo,
+        pullNumber: identity.pullNumber,
+        headSha: identity.reviewHeadSha,
+        pullTitle: pr.title,
+        fileCount: stats.files,
+      },
+      (text) => estimator.text(text),
+    ),
+  );
+
+  const budgetCheck = checkChunkBudgets(
+    rendered.map((r) => r.estimatedTokens),
+    estimator,
+  );
+  if (!budgetCheck.ok) {
+    logger.record(budgetCheck.diagnostic);
+    return finish(logger, baseOutputs(), "skipped_early_exit");
+  }
+
+  const affordable = selectAffordableChunks(chunks, config.maxRequestsPerRun);
+  if (affordable.dropped > 0) {
+    logger.annotation(
+      `This pull request produced ${chunks.length} chunks but only ` +
+        `${affordable.selected.length} fit within max_requests_per_run ` +
+        `(${config.maxRequestsPerRun}). ${affordable.dropped} chunk(s) were not reviewed.`,
+    );
+  }
+
+  logger.info("context ready", {
+    chunks_to_review: affordable.selected.length,
+    dropped: affordable.dropped,
+    prompt_tokens: rendered.reduce((sum, r) => sum + r.estimatedTokens, 0),
+  });
+
+  // Phase 4 wires the OpenRouter client and scheduler here. The context is built,
+  // filtered, chunked, rendered, and budget-verified; no request has been sent.
   return finish(
     logger,
-    { ...baseOutputs(), files_reviewed: String(files.length) },
+    {
+      ...baseOutputs(),
+      files_reviewed: String(stats.files),
+      requests_used: "0",
+    },
     "skipped_pipeline_not_implemented",
   );
 }

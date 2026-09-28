@@ -112,6 +112,7 @@ describe("loadConfig — required input", () => {
 describe("loadConfig — numeric inputs", () => {
   it.each([
     ["max_input_tokens", "0", "below min"],
+    ["max_input_tokens", "1500", "below the estimator's reserve"],
     ["max_input_tokens", "abc", "not an integer"],
     ["max_input_tokens", "12abc", "trailing garbage"],
     ["max_input_tokens", "1e5", "exponent notation"],
@@ -129,9 +130,13 @@ describe("loadConfig — numeric inputs", () => {
   });
 
   it("accepts values at the exact bounds", () => {
+    // max_input_tokens has a floor of 2000, not 1000: the estimator reserves
+    // REQUEST_OVERHEAD_TOKENS + PER_CHUNK_SCAFFOLD_TOKENS before any diff
+    // content, and below that the content budget would hit its floor and the
+    // total would exceed the configured maximum.
     const c = loadConfig(
       env({
-        INPUT_MAX_INPUT_TOKENS: "1000",
+        INPUT_MAX_INPUT_TOKENS: "2000",
         INPUT_MAX_OUTPUT_TOKENS: "256",
         INPUT_MAX_CHANGED_LINES: "1",
         INPUT_MAX_REQUESTS_PER_RUN: "1",
@@ -139,12 +144,17 @@ describe("loadConfig — numeric inputs", () => {
         INPUT_MAX_FINDINGS_PER_CHUNK: "1",
       }),
     );
-    expect(c.maxInputTokens).toBe(1000);
+    expect(c.maxInputTokens).toBe(2000);
     expect(c.maxOutputTokens).toBe(256);
     expect(c.maxChangedLines).toBe(1);
     expect(c.maxRequestsPerRun).toBe(1);
     expect(c.maxConcurrency).toBe(1);
     expect(c.maxFindingsPerChunk).toBe(1);
+  });
+
+  it("rejects max_input_tokens below the estimator's reserve", () => {
+    expect(() => loadConfig(env({ INPUT_MAX_INPUT_TOKENS: "1999" }))).toThrow(/max_input_tokens/);
+    expect(() => loadConfig(env({ INPUT_MAX_INPUT_TOKENS: "1000" }))).toThrow(/max_input_tokens/);
   });
 
   it("applies documented defaults when inputs are absent", () => {
