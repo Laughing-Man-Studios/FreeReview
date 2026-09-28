@@ -20,13 +20,17 @@ jobs:
   workflow-lint:
     name: workflow lint
     runs-on: ubuntu-latest
-    # A malformed workflow fails at 0s with zero jobs, which produces a red X
-    # and no diagnostic at all. This catches that before merge.
+    # A malformed workflow fails at 0s with zero jobs, producing a red X and no
+    # diagnostic at all. This catches that before merge. It has already earned
+    # its place: it found the invalid `release_created` trigger and a
+    # cross-job `steps` reference, both of which failed opaquely.
+    #
     # Invoked as a Docker image so no third-party JavaScript is executed.
+    # No `args`: a Docker action receives them as a literal string, so a `*.yml`
+    # glob would never expand. actionlint's documented default with no
+    # arguments is to lint every workflow under .github/workflows.
     steps:
       - uses: docker://rhysd/actionlint:1.7.12
-        with:
-          args: -color .github/workflows/*.yml
 
   verify:
     name: typecheck, lint, test, build, dist integrity

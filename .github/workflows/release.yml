@@ -1,69 +1,213 @@
 name: Release
 
-# Automated releases so shipping is boring and the changelog is never stale.
+# Manual, deliberate releases.
 #
-# release-please owns CHANGELOG.md and creates a release PR from conventional
-# commits on main. Merging that PR creates the GitHub release and the git tag.
-# Manual releases are still possible by labelling a PR `release-please-manual`.
+# This replaces release-please, which could not run: the organisation forbids
+# GitHub Actions from creating or approving pull requests, and opening a
+# release PR is release-please's entire model. Repurposing that with a
+# "maintainer" token is a workaround; this is not.
 #
-# Deliberately minimal permissions: this workflow only needs to push a
-# changelog commit and create a tag.
+# A manual trigger is also the right call for a pre-release action. With
+# release-please, any merged `feat:` commit produces a release PR and the
+# version floats up on its own. Here, a human decides when to cut v1 — which
+# matters, because v1 is the Marketplace listing and should not ship until the
+# pipeline provably works.
+#
+# Uses the runner's preinstalled `gh` CLI. No third-party release action is
+# executed, which keeps the supply chain for the release path empty.
+#
+# Requires org "Administration: write" to create the tag and release, which
+# the default GITHUB_TOKEN does not have.
 
 permissions:
   contents: write
-  pull-requests: write
 
 on:
-  push:
-    branches: [main]
-  # Cut a release from a published GitHub release, if one is created by hand.
-  release:
-    types: ["published"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Version to release, e.g. 1.0.0 or v1.0.0"
+        required: true
+        type: string
+      notes:
+        description: "Extra release notes. If omitted, the matching CHANGELOG.md section is used."
+        required: false
+        type: string
+      dry_run:
+        description: "Verify everything but do not tag or publish"
+        required: false
+        default: false
+        type: boolean
 
 concurrency:
-  group: release-${{ github.ref }}
+  group: release
+  # Never cancel a release partway. Losing a half-tagged release is worse than
+  # waiting for the previous one to finish.
   cancel-in-progress: false
 
 jobs:
-  release-please:
+  release:
     runs-on: ubuntu-latest
-    # Re-exported so the verification job below can consume them. Cross-job
-    # values come from `needs.<job>.outputs`, never from `steps` — `steps` is
-    # scoped to the job that declared them.
-    outputs:
-      tag_created: ${{ steps.release.outputs.tag_created }}
-      tag_name: ${{ steps.release.outputs.tag_name }}
-    steps:
-      - uses: googleapis/release-please-action@v4
-        id: release
-        with:
-          token: ${{ secrets.GITHUB_TOKEN }}
-          # The action.yml lives at the repository root, which is what the
-          # Marketplace requires.
-          config-file: release-please-config.json
-
-  # Verifies that the committed bundle in a release tag actually matches its
-  # source. Runs after release-please tags, so a release can never ship a
-  # bundle that drifted from src/.
-  verify-release-artifact:
-    needs: release-please
-    if: needs.release-please.outputs.tag_created == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
     steps:
       - uses: actions/checkout@v6
         with:
-          ref: ${{ needs.release-please.outputs.tag_name }}
+          # Always release from main, never from the branch that triggered this.
+          ref: main
+          fetch-depth: 0
+
       - uses: actions/setup-node@v6
         with:
           node-version: "24"
+
       - run: npm ci --no-audit --no-fund
-      - run: npm run check:dist
-      - name: Confirm dist/ was actually committed to the release
+
+      # --- 1. Validate the requested version -------------------------------
+      # Inputs are passed via `env:` and read as "$VAR" rather than being
+      # interpolated straight into the script. Direct `${{ }}` interpolation
+      # inside a run block is a script-injection vector: a value containing a
+      # quote or `$(...)` becomes shell code.
+      - name: Validate version
+        id: version
+        env:
+          RAW_VERSION: ${{ inputs.version }}
         run: |
-          if [ ! -f dist/index.js ]; then
-            echo "::error::dist/index.js is missing from the release tag. A JavaScript action must commit its bundle."
+          set -euo pipefail
+          NORMALISED="${RAW_VERSION#v}"
+
+          if ! printf '%s' "$NORMALISED" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?$'; then
+            echo "::error::'${RAW_VERSION}' is not a valid semver version. Expected e.g. 1.0.0 or v1.0.0"
             exit 1
           fi
-          echo "dist/index.js present ($(wc -c < dist/index.js) bytes)"
+
+          if git rev-parse "refs/tags/v${NORMALISED}" >/dev/null 2>&1; then
+            echo "::error::tag v${NORMALISED} already exists. Bump the version or delete the tag."
+            exit 1
+          fi
+
+          echo "version=${NORMALISED}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${NORMALISED}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${NORMALISED}"
+
+      # --- 2. The artifact must be built from this exact source -------------
+      # Rebuilding and comparing catches "source fixed, dist stale": a release
+      # can never ship a bundle that does not reflect the tag's source.
+      - name: Build
+        run: npm run build
+
+      - name: Verify committed dist matches source
+        run: |
+          set -euo pipefail
+          git checkout -- dist/
+          npm run check:dist
+
+      - name: Verify the bundle is present and non-trivial
+        run: |
+          set -euo pipefail
+          test -f dist/index.js || { echo "::error::dist/index.js missing. A JavaScript action must commit its bundle."; exit 1; }
+          SIZE=$(wc -c < dist/index.js)
+          if [ "$SIZE" -lt 1000 ]; then
+            echo "::error::dist/index.js is only ${SIZE} bytes. That is not a real bundle."
+            exit 1
+          fi
+          echo "dist/index.js present (${SIZE} bytes)"
+
+      # --- 3. Confirm the security invariants still hold on the artifact ----
+      # Cheap, and the whole project rests on these.
+      - name: Security assertions against the shipped bundle
+        run: npm run test:security
+
+      # --- 4. Assemble release notes ---------------------------------------
+      # Precedence: the `notes` input wins, then the matching CHANGELOG.md
+      # section, then a placeholder. Structured as a real if/else rather than
+      # an `A && B || C` chain, which is ambiguous about which branch ran.
+      - name: Resolve release notes
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          SUPPLIED_NOTES: ${{ inputs.notes }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#v}"
+          SENTINEL=/tmp/notes-source
+
+          if [ -n "${SUPPLIED_NOTES}" ]; then
+            printf '%s\n' "${SUPPLIED_NOTES}" > /tmp/notes.md
+            echo "input" > "$SENTINEL"
+          elif [ -f CHANGELOG.md ]; then
+            # Slice the section headed `## [x.y.z]` up to the next `## `.
+            # Always exits 0; presence is reported via the sentinel file.
+            #
+            # shellcheck disable=SC2016
+            # SC2016 is a false positive here: the `${...}` sequences are
+            # JavaScript template literals inside a single-quoted heredoc, and
+            # the shell correctly must NOT expand them.
+            node -e '
+              const fs = require("node:fs");
+              const version = process.argv[1].replace(/[.\-]/g, "\\$&");
+              const lines = fs.readFileSync("CHANGELOG.md", "utf8").split("\n");
+              const start = lines.findIndex((l) => new RegExp(`^## \\[?${version}\\]?`).test(l));
+              if (start === -1) { process.exit(0); }
+              let end = lines.length;
+              for (let i = start + 1; i < lines.length; i++) {
+                if (/^## /.test(lines[i])) { end = i; break; }
+              }
+              const body = lines.slice(start + 1, end).join("\n").trim();
+              fs.writeFileSync("/tmp/notes.md", body || "_No changelog entries for this version._\n");
+              fs.writeFileSync("/tmp/notes-found", "changelog");
+            ' "$VERSION"
+            if [ -f /tmp/notes-found ]; then
+              echo "changelog" > "$SENTINEL"
+            else
+              echo "_No CHANGELOG.md section found for ${VERSION}._" > /tmp/notes.md
+              echo "placeholder" > "$SENTINEL"
+            fi
+          else
+            echo "_No release notes._" > /tmp/notes.md
+            echo "placeholder" > "$SENTINEL"
+          fi
+
+          echo "Release notes source: $(cat "$SENTINEL")"
+
+      - name: Dry run summary
+        if: ${{ inputs.dry_run }}
+        run: |
+          {
+            echo "## Dry run — nothing was tagged or published"
+            echo
+            echo "- Tag: \`${{ steps.version.outputs.tag }}\`"
+            echo "- Commit: $(git rev-parse --short HEAD)"
+            echo
+            echo "### Notes"
+            cat /tmp/notes.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # --- 5. Tag and publish ----------------------------------------------
+      - name: Tag and publish
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git tag -a "${TAG}" -m "Release ${TAG}"
+          git push origin "refs/tags/${TAG}"
+
+          {
+            echo "## ${TAG}"
+            echo
+            cat /tmp/notes.md
+            echo
+            echo "---"
+            echo
+            echo "Bundle verified against this tag's source, and security assertions passed."
+          } > /tmp/release-body.md
+
+          gh release create "${TAG}" \
+            --title "${TAG}" \
+            --notes-file /tmp/release-body.md \
+            --verify-tag
+
+          echo "::notice::Published ${TAG}"
+          echo "review_url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"

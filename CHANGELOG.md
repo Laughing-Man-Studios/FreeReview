@@ -5,14 +5,27 @@ All notable changes to this project are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-Release notes are generated from conventional commits, so the commit subject
-line matters: `fix(anchor): reject context-only anchors` produces a `fix` entry
-under `Anchoring`, and `feat(publisher): ...` produces a minor bump.
+Releases are cut deliberately from the **Release** workflow (`workflow_dispatch`),
+not automatically from commit messages. Automated release PRs are impossible
+here because the organisation forbids GitHub Actions from creating pull
+requests, and a manual trigger is the better model anyway while the action is
+pre-release: `v1` is the Marketplace listing, and it should not appear because
+someone merged a `feat:` commit on a Friday.
+
+To cut a release:
+
+1. Add a `## [x.y.z]` section to this file, above `[Unreleased]`.
+2. Run the **Release** workflow with `version: x.y.z`. Use `dry_run: true` first
+   to confirm the version, the tag, and the assembled notes without publishing.
+
+The workflow rebuilds, verifies the committed `dist/` matches source, re-runs the
+security assertions against the bundle, tags, and publishes. It refuses to
+publish if any of that fails.
 
 > **Pre-release.** No tagged release has been published yet. The action is
 > under active development and is **not yet published to the GitHub
-> Marketplace**. Phases 1 and 2 of 8 are complete; the review pipeline does not
-> yet run. See [`docs/execution-plan.md`](docs/execution-plan.md).
+> Marketplace**. Phases 0–1 of 8 are complete; the review pipeline does not yet
+> run. See [`docs/execution-plan.md`](docs/execution-plan.md).
 
 ## [Unreleased]
 

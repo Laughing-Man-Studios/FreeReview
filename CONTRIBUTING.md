@@ -72,7 +72,8 @@ description and expect it to be discussed.
 
 ## Commit messages
 
-Conventional Commits, because release notes are generated from them.
+Conventional Commits, for a readable history and so release notes can be
+summarised accurately when a release is cut.
 
 ```
 feat(anchor): support multi-line ranges with mixed sides
@@ -84,6 +85,21 @@ chore(deps): bump vitest to 3.2.7
 
 Scopes in use: `diff`, `anchor`, `parser`, `schema`, `prompts`, `config`,
 `github`, `llm`, `publisher`, `scheduler`, `eval`, `deps`.
+
+## Cutting a release
+
+Releases are manual, via the **Release** workflow (`workflow_dispatch`). This is
+deliberate: the organisation forbids GitHub Actions from creating pull requests,
+and more importantly a human should decide when `v1` ships, because `v1` is the
+Marketplace listing.
+
+1. Add a `## [x.y.z]` section to `CHANGELOG.md`, above `[Unreleased]`.
+2. Run **Release** with `dry_run: true` to confirm version, tag, and notes.
+3. Run it again without `dry_run`.
+
+The workflow rebuilds from source, verifies the committed `dist/` matches, reruns
+the bundle security assertions, then tags and publishes. It will not publish if
+any check fails.
 
 ## Tests
 
