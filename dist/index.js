@@ -22488,7 +22488,18 @@ function renderSummary(input2) {
   const warning = input2.findings.filter((f) => f.severity === "warning").length;
   const info = input2.findings.filter((f) => f.severity === "info").length;
   lines.push("## FreeReview", "");
-  if (input2.findings.length === 0 && input2.unanchored.length === 0) {
+  if (input2.chunksReviewed === 0 && input2.chunksPlanned > 0) {
+    lines.push(
+      `**No review was produced.** ${input2.chunksPlanned} chunk(s) were prepared but none could be sent to a model successfully, so no code was examined.`
+    );
+    if (input2.failureDetail !== null) {
+      lines.push("", `Reason: ${neutraliseProse(input2.failureDetail)}`);
+    }
+    lines.push(
+      "",
+      "<sub>Treat this as **not reviewed**. It is not a finding of no issues \u2014 nothing was looked at.</sub>"
+    );
+  } else if (input2.findings.length === 0 && input2.unanchored.length === 0) {
     lines.push(
       `Reviewed ${input2.filesReviewed} file(s) and found nothing material. That is a result, not a guarantee \u2014 the review covers the changed lines only, and free models miss real defects.`
     );
@@ -23943,6 +23954,8 @@ async function run(env = process.env) {
   scheduler.setDailyRemaining(quota?.remaining ?? null);
   const findings = [];
   const modelsUsed = /* @__PURE__ */ new Set();
+  const failureDetails = [];
+  const chunksPlanned = affordable.selected.length;
   let chunksReviewed = 0;
   for (const [index2] of affordable.selected.entries()) {
     const outcome = await scheduler.runTask(
@@ -23954,10 +23967,17 @@ async function run(env = process.env) {
       usableModels
     );
     if (!outcome.ok) {
-      logger.log(outcome.diagnostic, `Chunk ${index2 + 1} could not be reviewed.`, {
+      const trail = outcome.attempts.map((a) => {
+        const status = a.httpStatus === null ? "status=none" : `status=${a.httpStatus}`;
+        const type = a.errorType === null ? "type=unclassified" : `type=${a.errorType}`;
+        return `${a.modelId} [${status} ${type} -> ${a.outcome}]`;
+      }).join("; ");
+      const detail = `Chunk ${index2 + 1} of ${chunksPlanned} could not be reviewed after ${outcome.requestsSpent} request(s). ${trail}`;
+      logger.log(outcome.diagnostic, detail, {
         requests_spent: outcome.requestsSpent,
-        attempts: outcome.attempts.map((a) => `${a.modelId}:${a.outcome}`).join(", ")
+        attempts: outcome.attempts.length
       });
+      failureDetails.push(detail);
       continue;
     }
     modelsUsed.add(outcome.result.modelId);
@@ -24078,7 +24098,12 @@ async function run(env = process.env) {
     filesReviewed: stats.files,
     filesInPr: changedFileCount,
     privacyMode: config2.privacyMode,
-    promptVersion: PROMPT_VERSION
+    promptVersion: PROMPT_VERSION,
+    chunksReviewed,
+    chunksPlanned,
+    // Only surfaced when nothing could be reviewed, so the body says why rather
+    // than simply reporting silence.
+    failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null
   });
   const published = await publishReview(client, {
     owner: identity.owner,

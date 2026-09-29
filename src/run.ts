@@ -600,6 +600,8 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
 
   const findings: RawFinding[] = [];
   const modelsUsed = new Set<string>();
+  const failureDetails: string[] = [];
+  const chunksPlanned = affordable.selected.length;
   let chunksReviewed = 0;
 
   for (const [index] of affordable.selected.entries()) {
@@ -617,10 +619,27 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     );
 
     if (!outcome.ok) {
-      logger.log(outcome.diagnostic, `Chunk ${index + 1} could not be reviewed.`, {
+      // Each attempt carries its status and error type, not just the verdict.
+      // "Chunk could not be reviewed" is unactionable; "503 attempt=0" tells a
+      // maintainer the routing constraints excluded every endpoint, which is a
+      // different problem from a rate limit and a different fix.
+      const trail = outcome.attempts
+        .map((a) => {
+          const status = a.httpStatus === null ? "status=none" : `status=${a.httpStatus}`;
+          const type = a.errorType === null ? "type=unclassified" : `type=${a.errorType}`;
+          return `${a.modelId} [${status} ${type} -> ${a.outcome}]`;
+        })
+        .join("; ");
+
+      const detail =
+        `Chunk ${index + 1} of ${chunksPlanned} could not be reviewed after ` +
+        `${outcome.requestsSpent} request(s). ${trail}`;
+
+      logger.log(outcome.diagnostic, detail, {
         requests_spent: outcome.requestsSpent,
-        attempts: outcome.attempts.map((a) => `${a.modelId}:${a.outcome}`).join(", "),
+        attempts: outcome.attempts.length,
       });
+      failureDetails.push(detail);
       continue;
     }
 
@@ -779,6 +798,11 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     filesInPr: changedFileCount,
     privacyMode: config.privacyMode,
     promptVersion: PROMPT_VERSION,
+    chunksReviewed,
+    chunksPlanned,
+    // Only surfaced when nothing could be reviewed, so the body says why rather
+    // than simply reporting silence.
+    failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null,
   });
 
   const published = await publishReview(client, {

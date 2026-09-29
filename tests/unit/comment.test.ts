@@ -140,9 +140,59 @@ function summary(overrides: Partial<SummaryInput> = {}): SummaryInput {
     filesInPr: 4,
     privacyMode: "strict",
     promptVersion: "2026-09-27.1",
+    chunksReviewed: 1,
+    chunksPlanned: 1,
+    failureDetail: null,
     ...overrides,
   };
 }
+
+describe("a run that reviewed nothing must never read as a clean review", () => {
+  // This is the single most damaging thing this action could say. Found in
+  // live verification: every model returned NO_ELIGIBLE_PROVIDER, and the
+  // published review read "Reviewed 1 file(s) and found nothing material. That
+  // is a result, not a guarantee" — for code that was never examined.
+  it("says no review was produced, not that nothing was found", () => {
+    const body = renderSummary(
+      summary({
+        findings: [],
+        chunksReviewed: 0,
+        chunksPlanned: 1,
+        modelUsed: "",
+        failureDetail: "Chunk 1 of 1 could not be reviewed after 5 request(s). qwen [status=503 type=unclassified -> fallback]",
+      }),
+    );
+
+    expect(body).toContain("No review was produced");
+    expect(body).not.toMatch(/found nothing material/);
+  });
+
+  it("marks the result as not-reviewed, unambiguously", () => {
+    const body = renderSummary(summary({ findings: [], chunksReviewed: 0, chunksPlanned: 1 }));
+    expect(body).toMatch(/not reviewed/);
+    expect(body).toMatch(/not a finding of no issues/);
+  });
+
+  it("gives the reason, so the failure is diagnosable from the PR", () => {
+    const body = renderSummary(
+      summary({ findings: [], chunksReviewed: 0, chunksPlanned: 2, failureDetail: "status=503 attempt=0 on every model" }),
+    );
+    expect(body).toContain("status=503 attempt=0");
+  });
+
+  it("still counts a partially-reviewed run as a review", () => {
+    // Two of five chunks failed. Some code was examined, so the summary should
+    // report a result — but it must not imply the whole diff was covered.
+    const body = renderSummary(summary({ findings: [], chunksReviewed: 2, chunksPlanned: 5 }));
+    expect(body).toMatch(/found nothing material/);
+    expect(body).not.toContain("No review was produced");
+  });
+
+  it("never says 'nothing material' when every chunk failed", () => {
+    const body = renderSummary(summary({ findings: [], chunksReviewed: 0, chunksPlanned: 3 }));
+    expect(body).not.toMatch(/found nothing material/);
+  });
+});
 
 describe("the review summary", () => {
   it("says findings were not placed, rather than hiding them", () => {

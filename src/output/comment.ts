@@ -131,6 +131,20 @@ export interface SummaryInput {
   readonly filesInPr: number;
   readonly privacyMode: "strict" | "relaxed";
   readonly promptVersion: string;
+  /**
+   * Chunks that were actually sent to a model and returned a usable response.
+   *
+   * This exists to prevent the single most damaging thing this action could
+   * say. Without it, a run where every chunk failed to route renders as
+   * "reviewed 1 file and found nothing material" — a clean bill of health for
+   * code that was never examined. That is worse than publishing nothing,
+   * because it is indistinguishable from a real clean review.
+   */
+  readonly chunksReviewed: number;
+  /** Chunks the run intended to review, before failures. */
+  readonly chunksPlanned: number;
+  /** Why no chunk could be reviewed, when none could. */
+  readonly failureDetail: string | null;
 }
 
 /**
@@ -150,7 +164,23 @@ export function renderSummary(input: SummaryInput): string {
 
   lines.push("## FreeReview", "");
 
-  if (input.findings.length === 0 && input.unanchored.length === 0) {
+  // The no-review case comes first and is never phrased as a result. "Found
+  // nothing material" and "could not look at anything" are opposites, and a
+  // reader who cannot tell them apart will treat a routing failure as a clean
+  // review.
+  if (input.chunksReviewed === 0 && input.chunksPlanned > 0) {
+    lines.push(
+      `**No review was produced.** ${input.chunksPlanned} chunk(s) were prepared but none could be ` +
+        "sent to a model successfully, so no code was examined.",
+    );
+    if (input.failureDetail !== null) {
+      lines.push("", `Reason: ${neutraliseProse(input.failureDetail)}`);
+    }
+    lines.push(
+      "",
+      "<sub>Treat this as **not reviewed**. It is not a finding of no issues — nothing was looked at.</sub>",
+    );
+  } else if (input.findings.length === 0 && input.unanchored.length === 0) {
     lines.push(
       `Reviewed ${input.filesReviewed} file(s) and found nothing material. That is a result, not a guarantee — the review covers the changed lines only, and free models miss real defects.`,
     );
