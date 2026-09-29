@@ -822,6 +822,7 @@ var Scheduler = class {
             outcome: error62.failure,
             errorType: error62.errorType,
             httpStatus: error62.httpStatus,
+            errorMessage: error62.message.slice(0, 200),
             retryAfterSeconds: error62.retryAfterSeconds,
             willRetry: canRetry,
             willFallback: wantsFallback
@@ -23967,17 +23968,23 @@ async function run(env = process.env) {
       usableModels
     );
     if (!outcome.ok) {
-      const trail = outcome.attempts.map((a) => {
+      const attemptTrail = outcome.attempts.map((a) => {
         const status = a.httpStatus === null ? "status=none" : `status=${a.httpStatus}`;
         const type = a.errorType === null ? "type=unclassified" : `type=${a.errorType}`;
-        return `${a.modelId} [${status} ${type} -> ${a.outcome}]`;
+        const message = a.errorMessage === void 0 ? "" : ` msg="${a.errorMessage}"`;
+        return `${a.modelId} [${status} ${type}${message} -> ${a.outcome}]`;
       }).join("; ");
-      const detail = `Chunk ${index2 + 1} of ${chunksPlanned} could not be reviewed after ${outcome.requestsSpent} request(s). ${trail}`;
-      logger.log(outcome.diagnostic, detail, {
+      const lead = `Chunk ${index2 + 1} of ${chunksPlanned} could not be reviewed after ${outcome.requestsSpent} request(s). `;
+      logger.log(outcome.diagnostic, `${lead}${attemptTrail}`, {
         requests_spent: outcome.requestsSpent,
         attempts: outcome.attempts.length
       });
-      failureDetails.push(detail);
+      failureDetails.push(
+        `${lead}${outcome.attempts.map((a) => {
+          const status = a.httpStatus === null ? "status=none" : `status=${a.httpStatus}`;
+          return `${a.modelId} (${status})`;
+        }).join(", ")}`
+      );
       continue;
     }
     modelsUsed.add(outcome.result.modelId);

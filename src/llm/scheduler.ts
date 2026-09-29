@@ -62,6 +62,19 @@ export interface AttemptRecord {
   readonly outcome: "success" | OpenRouterFailure;
   readonly errorType: string | null;
   readonly httpStatus: number | null;
+  /**
+   * OpenRouter's own error text, truncated.
+   *
+   * Present because `status` and `error_type` were both insufficient during
+   * live verification: every attempt came back `404` with no `error_type`, and
+   * nothing in the diagnostic distinguished "no endpoint matched your routing
+   * constraints" from "this model does not exist" — two problems with entirely
+   * different fixes.
+   *
+   * This is OpenRouter's error text, not repository content, so it carries no
+   * source. It is logged, never published to a pull request.
+   */
+  readonly errorMessage?: string | undefined;
   readonly retryAfterSeconds?: number | undefined;
   readonly willRetry: boolean;
   readonly willFallback: boolean;
@@ -200,6 +213,7 @@ export class Scheduler {
             outcome: error.failure,
             errorType: error.errorType,
             httpStatus: error.httpStatus,
+            errorMessage: error.message.slice(0, 200),
             retryAfterSeconds: error.retryAfterSeconds,
             willRetry: canRetry,
             willFallback: wantsFallback,

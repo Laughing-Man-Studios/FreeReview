@@ -623,23 +623,34 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
       // "Chunk could not be reviewed" is unactionable; "503 attempt=0" tells a
       // maintainer the routing constraints excluded every endpoint, which is a
       // different problem from a rate limit and a different fix.
-      const trail = outcome.attempts
+      const attemptTrail = outcome.attempts
         .map((a) => {
           const status = a.httpStatus === null ? "status=none" : `status=${a.httpStatus}`;
           const type = a.errorType === null ? "type=unclassified" : `type=${a.errorType}`;
-          return `${a.modelId} [${status} ${type} -> ${a.outcome}]`;
+          const message = a.errorMessage === undefined ? "" : ` msg="${a.errorMessage}"`;
+          return `${a.modelId} [${status} ${type}${message} -> ${a.outcome}]`;
         })
         .join("; ");
 
-      const detail =
+      const lead =
         `Chunk ${index + 1} of ${chunksPlanned} could not be reviewed after ` +
-        `${outcome.requestsSpent} request(s). ${trail}`;
+        `${outcome.requestsSpent} request(s). `;
 
-      logger.log(outcome.diagnostic, detail, {
+      // OpenRouter's error text is a third party's message and is logged only.
+      // The published body gets status and type, which are enough for a
+      // developer to understand the failure without echoing upstream text into
+      // a pull request.
+      logger.log(outcome.diagnostic, `${lead}${attemptTrail}`, {
         requests_spent: outcome.requestsSpent,
         attempts: outcome.attempts.length,
       });
-      failureDetails.push(detail);
+
+      failureDetails.push(
+        `${lead}${outcome.attempts.map((a) => {
+          const status = a.httpStatus === null ? "status=none" : `status=${a.httpStatus}`;
+          return `${a.modelId} (${status})`;
+        }).join(", ")}`,
+      );
       continue;
     }
 
