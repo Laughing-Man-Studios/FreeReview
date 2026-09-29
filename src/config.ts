@@ -379,7 +379,14 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   // total would exceed the configured maximum, which makes the budget
   // guarantee meaningless. 2000 leaves 700 tokens of usable content.
   const maxInputTokens = readInt(env, "max_input_tokens", 24_000, { min: 2_000, max: 400_000 });
-  const maxOutputTokens = readInt(env, "max_output_tokens", 1_500, { min: 256, max: 32_000 });
+  // 4000, not 1500. The only free model with a ZDR endpoint is a reasoning
+  // model that spends this budget on reasoning before emitting any content.
+  // Measured 2026-09-29: at 1500 it returned an empty response on 4 of 4
+  // attempts; at 4000 it returned usable JSON on all 4. Too small produces an
+  // empty response, not a short one, so this is a correctness floor rather than
+  // a quality preference. Near-free to raise: the binding constraint is
+  // requests per day, and a `:free` endpoint prices at zero per token.
+  const maxOutputTokens = readInt(env, "max_output_tokens", 4_000, { min: 256, max: 32_000 });
   const maxChangedLines = readInt(env, "max_changed_lines", 2_000, { min: 1, max: 100_000 });
 
   const config: Config = {

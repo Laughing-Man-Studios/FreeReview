@@ -162,7 +162,19 @@ describe("loadConfig — numeric inputs", () => {
     const c = loadConfig(env());
     expect(c.maxChangedLines).toBe(2000);
     expect(c.maxInputTokens).toBe(24000);
-    expect(c.maxOutputTokens).toBe(1500);
+    expect(c.maxOutputTokens).toBe(4_000);
+  });
+
+  it("defaults the output budget high enough for a reasoning model to finish", () => {
+    // Measured 2026-09-29: the only free model with a ZDR endpoint is a
+    // reasoning model. At 1500 output tokens it returned an empty response on
+    // 4 of 4 attempts; at 4000 it returned usable JSON on all 4.
+    //
+    // Too small produces an empty response rather than a short one, so this is a
+    // correctness floor, not a quality preference. If it regresses, every run
+    // silently publishes "no review was produced" and nothing looks broken.
+    const c = loadConfig(env());
+    expect(c.maxOutputTokens).toBeGreaterThanOrEqual(3_000);
     expect(c.maxRequestsPerRun).toBe(8);
     expect(c.maxConcurrency).toBe(2);
     expect(c.maxFindingsPerChunk).toBe(5);
@@ -367,7 +379,7 @@ describe("validateConfig — context window arithmetic", () => {
       if (m.maxContextTokens === null) continue;
       expect(
         m.maxContextTokens,
-        `${m.id} window too small for 24000+1500`,
+        `${m.id} window too small for 24000+4000`,
       ).toBeGreaterThanOrEqual(24_000 + 1_500);
     }
   });

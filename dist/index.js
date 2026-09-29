@@ -253,7 +253,7 @@ function loadConfig(env = process.env) {
     ];
   }
   const maxInputTokens = readInt(env, "max_input_tokens", 24e3, { min: 2e3, max: 4e5 });
-  const maxOutputTokens = readInt(env, "max_output_tokens", 1500, { min: 256, max: 32e3 });
+  const maxOutputTokens = readInt(env, "max_output_tokens", 4e3, { min: 256, max: 32e3 });
   const maxChangedLines = readInt(env, "max_changed_lines", 2e3, { min: 1, max: 1e5 });
   const config2 = {
     openrouterApiKey,

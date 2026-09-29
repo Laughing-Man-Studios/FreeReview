@@ -1,7 +1,7 @@
 # FreeReview — Execution Plan
 
-**Status:** In progress — Phases 0–6 complete; live `ReviewTest` verification outstanding
-**Date:** 2026-09-27 (Phases 4–6 completed 2026-09-28)
+**Status:** In progress — Phases 0–6 complete, including live verification against `ReviewTest`
+**Date:** 2026-09-27 (Phases 4–6 completed 2026-09-28; live verification 2026-09-29)
 **Canonical location:** this file; copied verbatim to `docs/execution-plan.md` at implementation start
 **Derived from:** `docs/plan.md` (design record — see its new status/supersedes header)
 
@@ -747,11 +747,42 @@ Deviations from the plan, and why:
 
 Wiring: `run.ts` sends the first real requests. Chunks are reviewed through the scheduler, responses are parsed and schema-validated, and findings are collected — but **nothing is anchored or published yet**, so the run ends at `skipped_publisher_not_implemented`. An unanchored finding has no safe destination; Phase 6 gives it one.
 
-### Phase 6 — Validation, dedupe, publisher (1.5 days) — **COMPLETE (code)**
+### Phase 6 — Validation, dedupe, publisher (1.5 days) — **COMPLETE (code + live verification)**
 `pipeline/{validate,dedupe,stale}.ts`, `output/{comment,suggestion,summary}.ts`, `github/publish.ts`.
 **Exit:** **`freereview-sandbox` receives a `COMMENT` review with correctly anchored inline comments**, verified visually and via `GET pulls/{n}/reviews/{id}/comments` asserting `line`/`side`/`original_line`; `STALE_HEAD_SHA` proven by a test mutating head SHA mid-run; publish-422 degradation proven.
 
-**Delivered as:** `pipeline/{validate,dedupe,stale}.ts`, `output/comment.ts` (comment + suggestion + summary in one module — they share the neutralisation rules, and splitting them would mean three copies of the same escaping), `github/publish.ts`. The live `ReviewTest` verification is the one item outstanding, and it is blocked only on the author's willingness to spend quota.
+**Delivered as:** `pipeline/{validate,dedupe,stale}.ts`, `output/comment.ts` (comment + suggestion + summary in one module — they share the neutralisation rules, and splitting them would mean three copies of the same escaping), `github/publish.ts`.
+
+#### 6a. Live verification, 2026-09-29 — seven PRs against `Laughing-Man-Studios/ReviewTest`
+
+Run on a funded account (1000 RPD confirmed via `GET /api/v1/key`), `privacy_mode: strict`, shipped defaults. This is the exit criterion the unit suite could not reach.
+
+| PR | Scenario | Result |
+|---|---|---|
+| #1 | Real off-by-one, RIGHT side | 1 request, 1 finding, anchored and published |
+| #2 | Defect in removed code | 1 finding published (see caveats) |
+| #3 | Multi-line range | 1 finding published (see caveats) |
+| #4 | Prompt injection in the diff | 0 findings — injection not followed |
+| #5 | Formatting-only | 0 findings — no padding |
+| #6 | Identical defect in two files | 2 findings, correctly *not* merged (different paths) |
+| #7 | Oversized (2602 lines) | `PR_TOO_LARGE`, 0 requests spent |
+
+**What this proves:** the whole chain works end to end against the real API — catalog probe, quota preflight, chunking, request, PROMPT_JSON parse, anchoring, validation, dedupe, stale re-check, atomic publication. And the failure paths behave: #7 spends nothing, #4 and #5 produce nothing rather than inventing something.
+
+**What this does not prove:** that the model *finds* planted defects. On #2 and #3 it anchored to a different line than the one seeded, because those were whole-file rewrites and the model reasoned about the file rather than the specific defect. That is a *model quality* question, and it belongs to Phase 7's golden dataset with ground-truth scoring, not to a handful of ad-hoc fixtures. Left-side and multi-line anchoring remain unproven **live** and are covered by the Phase 2 anchoring property tests.
+
+**`line`/`side` come back null from GitHub.** A direct API call with explicit `line: 3, side: "RIGHT"` returns `line: null, side: null, position: 19` on this repository, identically to FreeReview's own request. Placement is verified instead via `position` and `diff_hunk`, both of which show the comment on the correct line. This is not a FreeReview defect, but it means the exit criterion as written cannot be met on this repo and is restated above in terms of what was actually verifiable.
+
+#### 6b. Four defects found only by running it
+
+1. **The default configuration could not review anything.** Under the default `strict` privacy, all six default models returned `404 No endpoints found matching your data policy (Zero data retention)`. Probing every free model in the catalog with `zdr: true` found exactly one that routes: `inclusionai/ling-3.0-flash-sante:free` (Novita), which has no `structured_outputs` and no `response_format`. Fixed by adding `zdrEligible` to `ModelDefinition` and ordering ZDR-capable models first in strict mode. See §7d.
+2. **A run that reviewed nothing published "found nothing material."** The exact opposite of what happened. Fixed: the summary now branches on `chunksReviewed` before finding count, and says "No review was produced … It is not a finding of no issues."
+3. **The README's own example did not work.** GitHub does not expose `GITHUB_TOKEN` to an action invoked with `uses:`, and `action.yml` never declared it. Fixed with a `github_token` input, and the README updated.
+4. **A template expression in `action.yml` broke every `uses:` load.** GitHub parses `action.yml` as an expression template; a `github.token` reference *inside an input description* made the whole file unparseable. Every consumer would have failed at load time while this repository's own CI passed, because nothing here loads the action. Fixed, and `npm run check:action` now guards it in CI and in the release.
+
+#### 6c. `max_output_tokens` default raised 1500 → 4000
+
+The one ZDR-capable free model is a **reasoning** model. At 1500 output tokens it spent the entire budget on reasoning and returned no content — 4 of 4 attempts, reported as `MODEL_OUTPUT_TRUNCATED` and correctly *not* retried. At 4000 it returned usable JSON on 4 of 4. Too small an output budget produces an *empty* response, not a short one, so this is a correctness floor. Near-free to raise: the binding constraint is requests per day, and a `:free` endpoint prices at zero per token.
 
 Deviations from the plan, and why:
 
@@ -792,6 +823,8 @@ Three caveats recorded rather than argued away:
 - **RPM stays 20 at any funding level.** Provider-side 429s are upstream saturation and credits do not affect them. A provider 429 must not be misdiagnosed as a quota ceiling.
 
 Until the decision is made, Phase 6 proceeds at 50/day, which costs roughly 30–60 requests total — one to two days. That is affordable without the upgrade, and Phase 7 is the phase where it stops being affordable.
+
+**Resolved 2026-09-29:** the account was funded and the tier confirmed live at 1000 RPD. Phase 6 verification consumed 8 requests. The per-key spend cap and the eval/production key split in 7a still apply to Phase 7.
 
 #### 7c. Deduplicated eval requests
 
@@ -852,6 +885,10 @@ All of `docs/plan.md` §38, plus:
 - [ ] `check:dist` in CI; `dist/` committed and verified
 - [ ] Weekly `verify-models.yml` drift check exists
 - [ ] `privacyVerifiedOn` set on every enabled model; `strict_providers` allowlist implemented
+- [x] `action.yml` validated by `check:action` in CI and in the release
+- [x] Default configuration produces a review under the default privacy mode
+- [x] ZDR-capable models ordered first in strict mode; `zdrEligible` recorded per model
+- [x] `max_output_tokens` default sufficient for a reasoning model to finish
 - [ ] README states quota expectation, privacy posture, and that findings are advisory
 - [ ] 32 golden fixtures across 26 categories with a held-out split; held-out gate met
 - [ ] `npm run validate:fixtures` green

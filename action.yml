@@ -52,9 +52,20 @@ inputs:
     default: "24000"
 
   max_output_tokens:
-    description: "Output token budget reserved for the structured response. Counts against the model's context window."
+    # 4000, not 1500. The only free model with a zero-data-retention endpoint is
+    # a reasoning model, and it spends this budget on reasoning before emitting
+    # anything. Measured 2026-09-29: at 1500 it returned no content on four of
+    # four attempts; at 4000 it returned usable JSON on all four.
+    #
+    # Raising this is close to free. The binding constraint is requests per day,
+    # not tokens, and a `:free` endpoint prices at zero per token either way.
+    description: >-
+      Output token budget for the response, including any reasoning tokens the
+      model spends before answering. Must be large enough for reasoning models
+      to finish thinking; too small produces an empty response rather than a
+      short one. Counts against the model's context window.
     required: false
-    default: "1500"
+    default: "4000"
 
   max_requests_per_run:
     description: "Hard cap on OpenRouter requests for one run, including retries and fallbacks. Default 8 keeps a worst-case PR at ~6 reviews/day against the 50/day free allowance."
