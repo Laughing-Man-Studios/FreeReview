@@ -78,6 +78,13 @@ jobs:
       - name: dist/ integrity
         run: npm run check:dist
 
+      # action.yml is parsed as an expression template by the runner, so a
+      # stray template expression in an input description makes every
+      # `uses:` invocation in every consumer fail at load time. This repo's own
+      # tests all pass in that state, because nothing here loads the action.
+      - name: action.yml validity
+        run: npm run check:action
+
   full-suite:
     name: full test suite (all directories)
     runs-on: ubuntu-latest

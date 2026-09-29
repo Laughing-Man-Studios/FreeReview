@@ -100,6 +100,11 @@ jobs:
           git checkout -- dist/
           npm run check:dist
 
+      # A release that ships an unparseable action.yml is worse than no release:
+      # every consumer's `uses:` fails at load time with no code executed.
+      - name: Verify action.yml loads
+        run: npm run check:action
+
       - name: Verify the bundle is present and non-trivial
         run: |
           set -euo pipefail

@@ -12,11 +12,16 @@ inputs:
     required: true
 
   github_token:
+    # No template expression anywhere in this file, not even in a comment.
+    # GitHub evaluates action.yml as an expression template, and the `github`
+    # context is not available there, so naming it makes the whole file
+    # unparseable and every `uses:` invocation fails at load time. Found in
+    # live verification; `npm run check:action` now guards it.
     description: >-
-      Token used to read the pull request and post the review. Pass
-      ${{ github.token }}. GitHub does not expose GITHUB_TOKEN to an action
-      invoked with `uses:`, so this must be wired explicitly; the step-level
-      `env: GITHUB_TOKEN:` alternative also works. Requires
+      Token used to read the pull request and post the review. Pass the
+      github.token context from your workflow. GitHub does not expose
+      GITHUB_TOKEN to an action invoked with `uses:`, so this must be wired
+      explicitly; a step-level `env: GITHUB_TOKEN:` also works. Requires
       'permissions: pull-requests: write'.
     required: false
     default: ""
