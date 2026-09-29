@@ -60,6 +60,7 @@ const QWEN: ModelDefinition = {
   supportsResponseFormat: true,
   supportsJsonSchema: true,
   privacyEligible: true,
+  zdrEligible: false,
 };
 
 const GEMMA: ModelDefinition = {
@@ -71,6 +72,7 @@ const GEMMA: ModelDefinition = {
   // No structured outputs, so it must not receive a json_schema.
   supportsJsonSchema: false,
   privacyEligible: true,
+  zdrEligible: false,
 };
 
 const NO_STRUCTURED: ModelDefinition = {
@@ -81,6 +83,7 @@ const NO_STRUCTURED: ModelDefinition = {
   supportsResponseFormat: false,
   supportsJsonSchema: false,
   privacyEligible: true,
+  zdrEligible: false,
 };
 
 const SCHEMA = {

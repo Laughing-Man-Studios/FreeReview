@@ -37,6 +37,7 @@ const QWEN: ModelDefinition = {
   supportsResponseFormat: true,
   supportsJsonSchema: true,
   privacyEligible: true,
+  zdrEligible: false,
 };
 
 const REQUIRED = { inputTokens: 24_000, outputTokens: 1_500, mode: "STRUCTURED" as const };

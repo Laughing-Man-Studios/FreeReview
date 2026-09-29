@@ -53,6 +53,7 @@ function model(overrides: Partial<ModelDefinition> = {}): ModelDefinition {
     supportsResponseFormat: true,
     supportsJsonSchema: true,
     privacyEligible: true,
+    zdrEligible: false,
     ...overrides,
   };
 }

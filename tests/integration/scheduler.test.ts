@@ -49,6 +49,7 @@ const PRIMARY: ModelDefinition = {
   supportsResponseFormat: true,
   supportsJsonSchema: true,
   privacyEligible: true,
+  zdrEligible: false,
 };
 
 const SECONDARY: ModelDefinition = { ...PRIMARY, id: "nvidia/nemotron-3-super-120b-a12b:free", priority: 1 };

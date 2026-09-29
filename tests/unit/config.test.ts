@@ -25,6 +25,7 @@ function model(overrides: Partial<ModelDefinition> = {}): ModelDefinition {
     supportsResponseFormat: true,
     supportsJsonSchema: true,
     privacyEligible: true,
+    zdrEligible: false,
     ...overrides,
   };
 }
@@ -225,7 +226,51 @@ describe("loadConfig — model configuration", () => {
   it("uses DEFAULT_MODELS when no model input is given", () => {
     const c = loadConfig(env());
     expect(c.models).toHaveLength(DEFAULT_MODELS.length);
-    expect(c.models[0]?.id).toBe("qwen/qwen3.8-27b:free");
+    // The default primary is the one free model with a verified ZDR endpoint.
+    // Everything else in the pool returns 404 under the default strict privacy
+    // mode, so shipping anything else first means the default configuration
+    // reviews nothing.
+    expect(c.models[0]?.id).toBe("inclusionai/ling-3.0-flash-sante:free");
+  });
+
+  it("has exactly one model with a verified ZDR endpoint", () => {
+    // Measured 2026-09-29 by probing every free model in the catalog with
+    // `zdr: true`. If a second one appears, this test is the prompt to verify
+    // it properly and re-order the pool toward structured output.
+    const zdr = DEFAULT_MODELS.filter((m) => m.zdrEligible);
+    expect(zdr.map((m) => m.id)).toEqual(["inclusionai/ling-3.0-flash-sante:free"]);
+  });
+
+  it("orders ZDR-capable models first in strict mode, so the budget is not wasted", () => {
+    // Under strict, every request carries zdr:true, so trying a non-ZDR model is
+    // a guaranteed 404 that costs one of the daily allowance to learn nothing.
+    const c = loadConfig(env());
+    const first = eligibleModels(c)[0];
+    expect(first?.zdrEligible).toBe(true);
+  });
+
+  it("keeps the whole pool available in strict mode, just re-ordered", () => {
+    // Not excluded: a ZDR endpoint can appear or disappear, so a pool that
+    // hard-excluded non-ZDR models would have no recovery path.
+    const c = loadConfig(env());
+    expect(eligibleModels(c)).toHaveLength(DEFAULT_MODELS.filter((m) => m.enabled).length);
+  });
+
+  it("does not reorder in relaxed mode, where ZDR is not requested", () => {
+    const c = loadConfig(env({ INPUT_PRIVACY_MODE: "relaxed" }));
+    const order = eligibleModels(c).map((m) => m.id);
+    expect(order[0]).toBe("inclusionai/ling-3.0-flash-sante:free");
+    // Priority order is otherwise preserved.
+    const priorities = eligibleModels(c).map((m) => m.priority);
+    expect(priorities).toEqual([...priorities].sort((a, b) => a - b));
+  });
+
+  it("does not promote a user-supplied model to ZDR-capable", () => {
+    // A bare `primary_model` is a user assertion with no measured ZDR verdict.
+    // Assuming `true` would put an unverified model at the front of a strict
+    // pool where it is guaranteed to 404.
+    const c = loadConfig(env({ INPUT_PRIMARY_MODEL: "cohere/north-mini-code:free" }));
+    expect(c.models[0]?.zdrEligible).toBe(false);
   });
 
   it("every default model is a valid free ID", () => {
@@ -249,7 +294,7 @@ describe("loadConfig — model configuration", () => {
       env({ INPUT_FALLBACK_MODELS: " google/gemma-4-31b-it:free , liquid/lfm-2.5-2.6b:free " }),
     );
     expect(c.models.map((m) => m.id)).toEqual([
-      "qwen/qwen3.8-27b:free",
+      "inclusionai/ling-3.0-flash-sante:free",
       "google/gemma-4-31b-it:free",
       "liquid/lfm-2.5-2.6b:free",
     ]);
@@ -268,8 +313,10 @@ describe("loadConfig — model configuration", () => {
   });
 
   it("rejects duplicate models", () => {
+    // A fallback that repeats the primary would make the scheduler retry the
+    // same model twice on failure, burning two requests to learn one thing.
     expect(() =>
-      loadConfig(env({ INPUT_FALLBACK_MODELS: "qwen/qwen3.8-27b:free,liquid/lfm-2.5-2.6b:free" })),
+      loadConfig(env({ INPUT_FALLBACK_MODELS: "inclusionai/ling-3.0-flash-sante:free,liquid/lfm-2.5-2.6b:free" })),
     ).toThrow(/Duplicate/);
   });
 

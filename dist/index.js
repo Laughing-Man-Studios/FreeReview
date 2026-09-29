@@ -11,13 +11,37 @@ var __export = (target, all) => {
 // src/config.ts
 var DEFAULT_MODELS = [
   {
+    // The only free model verified to have a ZDR endpoint, as of 2026-09-29.
+    //
+    // It carries no `response_format` and no `structured_outputs`, so it runs
+    // in PROMPT_JSON mode and relies entirely on the defensive parser. That is
+    // a real quality cost, and it is the right trade anyway: without it, the
+    // default configuration under the default privacy mode reviews nothing at
+    // all. A review from a model parsing its own JSON beats no review, and
+    // Phase 7 measures whether it is good enough.
+    //
+    // Provider: Novita. ZDR confirmed by a live `zdr: true` request returning
+    // 200; the other 16 free models returned 404 or 429 on the same probe.
+    id: "inclusionai/ling-3.0-flash-sante:free",
+    enabled: true,
+    priority: 0,
+    maxContextTokens: 262144,
+    supportsResponseFormat: false,
+    supportsJsonSchema: false,
+    privacyEligible: true,
+    zdrEligible: true,
+    privacyVerifiedOn: "2026-09-29"
+  },
+  {
     id: "qwen/qwen3.8-27b:free",
     enabled: true,
     priority: 0,
     maxContextTokens: 262144,
     supportsResponseFormat: true,
     supportsJsonSchema: true,
-    privacyEligible: true
+    privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29"
   },
   {
     // Structured-output capable, 262k context. The strongest structured-output
@@ -28,7 +52,9 @@ var DEFAULT_MODELS = [
     maxContextTokens: 262144,
     supportsResponseFormat: true,
     supportsJsonSchema: true,
-    privacyEligible: true
+    privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29"
   },
   {
     id: "liquid/lfm-2.5-2.6b:free",
@@ -37,7 +63,9 @@ var DEFAULT_MODELS = [
     maxContextTokens: 65536,
     supportsResponseFormat: true,
     supportsJsonSchema: true,
-    privacyEligible: true
+    privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29"
   },
   {
     // Exposes `response_format` but NOT `structured_outputs`, so it cannot be
@@ -49,7 +77,9 @@ var DEFAULT_MODELS = [
     maxContextTokens: 262144,
     supportsResponseFormat: true,
     supportsJsonSchema: false,
-    privacyEligible: true
+    privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29"
   },
   {
     // No response_format at all. Selects PROMPT_JSON mode with defensive
@@ -60,7 +90,9 @@ var DEFAULT_MODELS = [
     maxContextTokens: 1e6,
     supportsResponseFormat: false,
     supportsJsonSchema: false,
-    privacyEligible: true
+    privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29"
   },
   {
     // Excluded by default: OpenRouter documents that free usage may be used to
@@ -72,7 +104,8 @@ var DEFAULT_MODELS = [
     maxContextTokens: 262144,
     supportsResponseFormat: false,
     supportsJsonSchema: false,
-    privacyEligible: false
+    privacyEligible: false,
+    zdrEligible: false
   },
   {
     // Excluded by default: the free Inkling endpoint documents that prompts and
@@ -83,7 +116,8 @@ var DEFAULT_MODELS = [
     maxContextTokens: 1048576,
     supportsResponseFormat: false,
     supportsJsonSchema: false,
-    privacyEligible: false
+    privacyEligible: false,
+    zdrEligible: false
   }
 ];
 var ConfigError = class extends Error {
@@ -147,10 +181,14 @@ function parseModelList(value, input2) {
       maxContextTokens: null,
       supportsResponseFormat: null,
       supportsJsonSchema: null,
-      // Unknown until the runtime catalog probe. An unverified model is
-      // treated as eligible in strict mode only if the request-time ZDR and
+      // Unknown for a user-supplied model. Treated as *not* ZDR-capable, which
+      // means it is still tried under strict mode — this flag only orders the
+      // pool, it never excludes — but it is tried after any model whose ZDR
+      // posture has actually been verified.
+      zdrEligible: false,
+      // Treated as eligible in strict mode only if the request-time ZDR and
       // data_collection constraints can be satisfied — which OpenRouter
-      // enforces, not us. A 503/404 means no endpoint qualified.
+      // enforces, not us. A 404 means no endpoint qualified.
       privacyEligible: true
     };
   });
@@ -189,7 +227,12 @@ function loadConfig(env = process.env) {
       maxContextTokens: null,
       supportsResponseFormat: null,
       supportsJsonSchema: null,
-      privacyEligible: true
+      privacyEligible: true,
+      // A bare `primary_model` is a user assertion. If the model is one of the
+      // defaults we have a measured ZDR verdict and use it; otherwise we have
+      // none, and assuming `true` would put an unverified model at the front of
+      // a strict-mode pool where it is guaranteed to 404.
+      zdrEligible: DEFAULT_MODELS.find((m) => m.id === primaryId)?.zdrEligible ?? false
     };
     const fallbackIds = configuredFallbacks ?? [];
     models = [
@@ -203,7 +246,8 @@ function loadConfig(env = process.env) {
           maxContextTokens: known?.maxContextTokens ?? null,
           supportsResponseFormat: known?.supportsResponseFormat ?? null,
           supportsJsonSchema: known?.supportsJsonSchema ?? null,
-          privacyEligible: known?.privacyEligible ?? true
+          privacyEligible: known?.privacyEligible ?? true,
+          zdrEligible: known?.zdrEligible ?? false
         };
       })
     ];
@@ -267,7 +311,13 @@ function validateConfig(config2) {
   }
 }
 function eligibleModels(config2) {
-  return config2.models.filter((m) => m.enabled).filter((m) => config2.privacyMode === "relaxed" || m.privacyEligible).sort((a, b) => a.priority - b.priority);
+  const strict = config2.privacyMode === "strict";
+  return config2.models.filter((m) => m.enabled).filter((m) => !strict || m.privacyEligible).sort((a, b) => {
+    if (strict && a.zdrEligible !== b.zdrEligible) {
+      return a.zdrEligible ? -1 : 1;
+    }
+    return a.priority - b.priority;
+  });
 }
 function capabilityModeFor(model) {
   if (model.supportsJsonSchema === true) return "STRUCTURED";
@@ -21763,7 +21813,7 @@ function parseFindingsResponse(raw, structured = null) {
 
 // src/prompt/version.ts
 var PROMPT_VERSION = "2026-09-27.1";
-var CONFIG_VERSION = "2026-09-27.1";
+var CONFIG_VERSION = "2026-09-29.1";
 
 // src/prompt/index.ts
 var FINDINGS_SCHEMA = {

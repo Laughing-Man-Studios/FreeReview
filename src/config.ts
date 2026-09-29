@@ -33,6 +33,21 @@ export interface ModelDefinition {
    * assertion recorded in source. See docs/execution-plan.md §1 item 2.
    */
   readonly privacyEligible: boolean;
+  /**
+   * Whether OpenRouter has a **zero-data-retention** endpoint for this model.
+   *
+   * This is the hard constraint behind `privacy_mode: strict`, and it is not
+   * the same question as `privacyEligible`. Measured live on 2026-09-29: of the
+   * free models in the catalog, exactly one could route with `zdr: true`, and
+   * none of the structured-output models could. A pool that looks privacy-safe
+   * on paper still returns `404 No endpoints found matching your data policy`
+   * at request time, so this is recorded per model rather than inferred.
+   *
+   * Not queryable at runtime — the per-endpoint APIs are management-key only —
+   * so this is a maintenance-time assertion, re-verified by `verify-models.yml`
+   * and recorded in `docs/execution-plan.md` §8a.
+   */
+  readonly zdrEligible: boolean;
   /** What produced `privacyEligible`, for the step summary. */
   readonly privacyVerifiedOn?: string;
 }
@@ -47,6 +62,28 @@ export interface ModelDefinition {
  */
 export const DEFAULT_MODELS: readonly ModelDefinition[] = [
   {
+    // The only free model verified to have a ZDR endpoint, as of 2026-09-29.
+    //
+    // It carries no `response_format` and no `structured_outputs`, so it runs
+    // in PROMPT_JSON mode and relies entirely on the defensive parser. That is
+    // a real quality cost, and it is the right trade anyway: without it, the
+    // default configuration under the default privacy mode reviews nothing at
+    // all. A review from a model parsing its own JSON beats no review, and
+    // Phase 7 measures whether it is good enough.
+    //
+    // Provider: Novita. ZDR confirmed by a live `zdr: true` request returning
+    // 200; the other 16 free models returned 404 or 429 on the same probe.
+    id: "inclusionai/ling-3.0-flash-sante:free",
+    enabled: true,
+    priority: 0,
+    maxContextTokens: 262_144,
+    supportsResponseFormat: false,
+    supportsJsonSchema: false,
+    privacyEligible: true,
+    zdrEligible: true,
+    privacyVerifiedOn: "2026-09-29",
+  },
+  {
     id: "qwen/qwen3.8-27b:free",
     enabled: true,
     priority: 0,
@@ -54,6 +91,8 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: true,
     supportsJsonSchema: true,
     privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29",
   },
   {
     // Structured-output capable, 262k context. The strongest structured-output
@@ -65,6 +104,8 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: true,
     supportsJsonSchema: true,
     privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29",
   },
   {
     id: "liquid/lfm-2.5-2.6b:free",
@@ -74,6 +115,8 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: true,
     supportsJsonSchema: true,
     privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29",
   },
   {
     // Exposes `response_format` but NOT `structured_outputs`, so it cannot be
@@ -86,6 +129,8 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: true,
     supportsJsonSchema: false,
     privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29",
   },
   {
     // No response_format at all. Selects PROMPT_JSON mode with defensive
@@ -97,6 +142,8 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: false,
     supportsJsonSchema: false,
     privacyEligible: true,
+    zdrEligible: false,
+    privacyVerifiedOn: "2026-09-29",
   },
   {
     // Excluded by default: OpenRouter documents that free usage may be used to
@@ -109,6 +156,7 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: false,
     supportsJsonSchema: false,
     privacyEligible: false,
+    zdrEligible: false,
   },
   {
     // Excluded by default: the free Inkling endpoint documents that prompts and
@@ -120,6 +168,7 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     supportsResponseFormat: false,
     supportsJsonSchema: false,
     privacyEligible: false,
+    zdrEligible: false,
   },
 ];
 
@@ -237,10 +286,14 @@ function parseModelList(
       maxContextTokens: null,
       supportsResponseFormat: null,
       supportsJsonSchema: null,
-      // Unknown until the runtime catalog probe. An unverified model is
-      // treated as eligible in strict mode only if the request-time ZDR and
+      // Unknown for a user-supplied model. Treated as *not* ZDR-capable, which
+      // means it is still tried under strict mode — this flag only orders the
+      // pool, it never excludes — but it is tried after any model whose ZDR
+      // posture has actually been verified.
+      zdrEligible: false,
+      // Treated as eligible in strict mode only if the request-time ZDR and
       // data_collection constraints can be satisfied — which OpenRouter
-      // enforces, not us. A 503/404 means no endpoint qualified.
+      // enforces, not us. A 404 means no endpoint qualified.
       privacyEligible: true,
     };
   });
@@ -294,6 +347,11 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
       supportsResponseFormat: null,
       supportsJsonSchema: null,
       privacyEligible: true,
+      // A bare `primary_model` is a user assertion. If the model is one of the
+      // defaults we have a measured ZDR verdict and use it; otherwise we have
+      // none, and assuming `true` would put an unverified model at the front of
+      // a strict-mode pool where it is guaranteed to 404.
+      zdrEligible: DEFAULT_MODELS.find((m) => m.id === primaryId)?.zdrEligible ?? false,
     };
 
     const fallbackIds = configuredFallbacks ?? [];
@@ -309,6 +367,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
           supportsResponseFormat: known?.supportsResponseFormat ?? null,
           supportsJsonSchema: known?.supportsJsonSchema ?? null,
           privacyEligible: known?.privacyEligible ?? true,
+          zdrEligible: known?.zdrEligible ?? false,
         };
       }),
     ];
@@ -395,18 +454,39 @@ export function validateConfig(config: Config): void {
 }
 
 /**
- * The enabled model pool in priority order, filtered by privacy policy.
+ * The enabled model pool, filtered and ordered by privacy policy.
  *
- * In strict mode, models flagged `privacyEligible: false` are excluded. Note
- * this is a *static* exclusion based on manually verified endpoint posture; the
- * authoritative enforcement is the per-request `zdr` / `data_collection` flags,
- * which OpenRouter applies.
+ * In strict mode, models flagged `privacyEligible: false` are excluded, and
+ * models flagged `zdrEligible: true` are ordered **first**.
+ *
+ * That ordering is the whole point. Live measurement on 2026-09-29 found that
+ * only one free model has a ZDR endpoint, and it is not the one with structured
+ * output support. Under strict privacy every request carries `zdr: true`, so
+ * trying a non-ZDR model is not a slower path to an answer — it is a guaranteed
+ * `404 No endpoints found matching your data policy`, costing one of 50 daily
+ * requests to learn nothing. Ordering ZDR-capable models first means strict mode
+ * spends its budget on requests that can succeed.
+ *
+ * Non-ZDR models are still retained in the pool rather than removed: they are
+ * correct for `relaxed`, and a ZDR endpoint can appear or disappear, so a pool
+ * that hard-excludes them would have no recovery path.
+ *
+ * Note this is a *static* preference based on manually verified endpoint
+ * posture. The authoritative enforcement is the per-request `zdr` /
+ * `data_collection` flags, which OpenRouter applies regardless of what we send.
  */
 export function eligibleModels(config: Config): ModelDefinition[] {
+  const strict = config.privacyMode === "strict";
+
   return config.models
     .filter((m) => m.enabled)
-    .filter((m) => config.privacyMode === "relaxed" || m.privacyEligible)
-    .sort((a, b) => a.priority - b.priority);
+    .filter((m) => !strict || m.privacyEligible)
+    .sort((a, b) => {
+      if (strict && a.zdrEligible !== b.zdrEligible) {
+        return a.zdrEligible ? -1 : 1;
+      }
+      return a.priority - b.priority;
+    });
 }
 
 /**

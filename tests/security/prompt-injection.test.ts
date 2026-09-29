@@ -262,6 +262,7 @@ describe("the request carries no capability the model was not offered", () => {
       supportsResponseFormat: true,
       supportsJsonSchema: false,
       privacyEligible: true,
+      zdrEligible: false,
     };
     expect(buildChatRequest(RENDERED, gemma, 1_500).schema).toBeUndefined();
   });

@@ -18,7 +18,14 @@ export const PROMPT_VERSION = "2026-09-27.1";
  * Bump on any change to request construction, model pool, chunking, or
  * validation behaviour that could alter a result independently of the prompt.
  */
-export const CONFIG_VERSION = "2026-09-27.1";
+/**
+ * 2026-09-29.1 — the default model pool gained `inclusionai/ling-3.0-flash-sante:free`
+ * and `eligibleModels` began ordering ZDR-capable models first in strict mode.
+ * Before this, the default configuration under the default privacy mode could
+ * not review anything: every model in the pool returned 404 for lack of a
+ * zero-data-retention endpoint.
+ */
+export const CONFIG_VERSION = "2026-09-29.1";
 
 /**
  * The composite identity an LLM result is attributed to, per the plan's
