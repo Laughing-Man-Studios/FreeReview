@@ -94,7 +94,13 @@ jobs:
       - uses: Laughing-Man-Studios/FreeReview@v1
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+          github_token: ${{ github.token }}
 ```
+
+`github_token` is not optional in practice: GitHub does not expose
+`GITHUB_TOKEN` to an action invoked with `uses:`, so it has to be wired
+explicitly. Setting `env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}` on the
+step works equally well.
 
 **Do not add `actions/checkout`.** The action obtains everything it needs
 through the API and is specifically designed never to materialise your code.

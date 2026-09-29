@@ -23760,11 +23760,11 @@ async function run(env = process.env) {
     pull: event.pullNumber,
     action: event.action
   });
-  const token = env["GITHUB_TOKEN"];
+  const token = env["INPUT_GITHUB_TOKEN"] ?? env["GITHUB_TOKEN"];
   if (token === void 0 || token.length === 0) {
     logger.log(
       "MISSING_CREDENTIALS",
-      "GITHUB_TOKEN is not available. Invoke this action from a GitHub Actions workflow with 'permissions: pull-requests: write'."
+      "No GitHub token was provided. Pass github_token: ${{ github.token }} to this action, or set env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} on the step, and grant 'permissions: pull-requests: write'."
     );
     return finish(logger, baseOutputs(), "failed");
   }

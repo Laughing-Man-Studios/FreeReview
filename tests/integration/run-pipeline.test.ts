@@ -681,6 +681,43 @@ describe("the publication contract", () => {
   });
 });
 
+describe("credential wiring", () => {
+  // Found in live verification: GitHub does not inject GITHUB_TOKEN into an
+  // action invoked with `uses:`, and action.yml did not declare the token as an
+  // input — so the README's own example failed with MISSING_CREDENTIALS. Every
+  // `pull_request` run failed while hand-rolled dispatch runs, which is exactly
+  // the configuration a consumer is most likely to copy.
+
+  it("accepts the token from the github_token input", async () => {
+    reviewable();
+    // Deliberately no GITHUB_TOKEN in the environment: this is what `uses:`
+    // looks like unless the workflow wires the token explicitly.
+    const outputs = await run(
+      env({ GITHUB_TOKEN: undefined, INPUT_GITHUB_TOKEN: "ghp_testtoken0000000000000000000000" }),
+    );
+
+    expect(published).toHaveLength(1);
+    expect(outputs.requests_used).toBe("1");
+  });
+
+  it("still accepts a step-level GITHUB_TOKEN env var", async () => {
+    reviewable();
+    await run(env({ INPUT_GITHUB_TOKEN: undefined }));
+
+    expect(published).toHaveLength(1);
+  });
+
+  it("fails the run when no token is available at all", async () => {
+    // A failure, not a skip: a token that cannot read anything must not
+    // produce a green run, which is the same reasoning as an unreadable private
+    // repository earlier in the pipeline.
+    const outputs = await run(env({ GITHUB_TOKEN: undefined, INPUT_GITHUB_TOKEN: undefined }));
+
+    expect(outputs.status).toBe("failed");
+    expect(published).toHaveLength(0);
+  });
+});
+
 describe("the skip marker is versioned", () => {
   it("uses a dated version, so a prompt change is visibly distinguishable from a code change", () => {
     // The versions are embedded in the skip marker comment to suppress

@@ -256,11 +256,17 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
   });
 
   // --- 2. Credentials (no API call) --------------------------------------
-  const token = env["GITHUB_TOKEN"];
+  // The token is read from the `github_token` input first, then from the
+  // environment. Both are supported because GitHub does NOT inject
+  // `GITHUB_TOKEN` into an action invoked with `uses:` — a step must opt in
+  // explicitly. Without the input, the README's own example failed with
+  // MISSING_CREDENTIALS, which is how this was found.
+  const token = env["INPUT_GITHUB_TOKEN"] ?? env["GITHUB_TOKEN"];
   if (token === undefined || token.length === 0) {
     logger.log(
       "MISSING_CREDENTIALS",
-      "GITHUB_TOKEN is not available. Invoke this action from a GitHub Actions workflow with " +
+      "No GitHub token was provided. Pass github_token: ${{ github.token }} to this action, " +
+        "or set env: GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} on the step, and grant " +
         "'permissions: pull-requests: write'.",
     );
     return finish(logger, baseOutputs(), "failed");
