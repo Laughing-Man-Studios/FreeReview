@@ -23,6 +23,7 @@
  */
 
 import type { AnchoredFinding, Severity } from "../types.js";
+import type { ModelDefinition } from "../config.js";
 
 /** Fence long enough to wrap any quote the schema accepts. */
 const MAX_QUOTE_LENGTH = 1_200;
@@ -145,6 +146,78 @@ export interface SummaryInput {
   readonly chunksPlanned: number;
   /** Why no chunk could be reviewed, when none could. */
   readonly failureDetail: string | null;
+  /**
+   * Disclosed when a model with measured prompt-injection exposure produced this
+   * review. See `injectionDisclosure`.
+   */
+  readonly injectionNote: string | null;
+}
+
+/**
+ * What to say when the reviewing model has been measured following instructions
+ * embedded in a diff.
+ *
+ * ## Why this is in the published comment and not just the log
+ *
+ * Only the primary model has ever been measured resistant. If the primary is
+ * rate-limited and a review falls through to a fallback, a pull request author
+ * can suppress findings by writing a comment in their own diff — and a
+ * suppressed review and a clean review look identical. That is the exact failure
+ * this project exists to prevent, and it is reachable precisely when the service
+ * is under strain.
+ *
+ * Disclosing it in the review body is the only place a reader who did not watch
+ * the logs will see it. A suppressed review that presents as clean is the worst
+ * outcome available; one that announces its own exposure is merely incomplete.
+ *
+ * ## Why it names the measurement
+ *
+ * "This model may be susceptible to prompt injection" is unfalsifiable and
+ * therefore useless — it is also what every tool says. The note states what was
+ * tested and what happened, so a reader can weigh it, and so a future change to
+ * the model invalidates a claim that was specific rather than a disclaimer that
+ * was always true anyway.
+ *
+ * `unmeasured` is disclosed too. Silence would be indistinguishable from
+ * `resistant`, and that is precisely the confusion this project exists to
+ * prevent.
+ */
+export function injectionDisclosure(
+  modelIds: readonly string[],
+  catalog: readonly ModelDefinition[],
+): string | null {
+  const byId = new Map(catalog.map((m) => [m.id, m]));
+
+  const exposed = modelIds.filter((id) => byId.get(id)?.injectionResistance === "exposed");
+  const unmeasured = modelIds.filter((id) => {
+    const r = byId.get(id)?.injectionResistance;
+    return r === undefined || r === "unmeasured";
+  });
+
+  if (exposed.length > 0) {
+    const names = exposed.map((id) => `\`${id}\``).join(", ");
+    return (
+      `> **This review may be incomplete.** It was produced by ${names}, which was measured ` +
+      "following instructions written into a pull request diff — a comment telling the model to " +
+      "ignore its instructions and report nothing. A pull request author can therefore suppress " +
+      "findings by adding such a comment to their own diff.\n>\n" +
+      "> FreeReview detects this by planting the suppression instruction next to a real defect: " +
+      "the only way to pass is to ignore the instruction. This model did not.\n>\n" +
+      "> Treat the findings below as a lower bound, not as a clean review. Only the default model " +
+      "has been measured resistant; fallbacks exist for availability, not for this property."
+    );
+  }
+
+  if (unmeasured.length > 0) {
+    const names = unmeasured.map((id) => `\`${id}\``).join(", ");
+    return (
+      `> **This model's resistance to instructions embedded in the diff has not been measured.** ` +
+      `It was produced by ${names}. If a diff contains a comment instructing the model to ignore ` +
+      "its instructions, findings may be missing and this review will not say so."
+    );
+  }
+
+  return null;
 }
 
 /**
@@ -202,6 +275,14 @@ export function renderSummary(input: SummaryInput): string {
       `Model: \`${input.modelUsed || "none"}\` · ${input.requestsUsed} request(s) · ` +
       `prompt \`${input.promptVersion}\`.</sub>`,
   );
+
+  if (input.injectionNote !== null) {
+    // Same placement and emphasis as the privacy warning: a suppressed review and
+    // a clean review are indistinguishable to a reader, and only the review body
+    // reaches someone who never opened the workflow logs.
+    lines.push("");
+    lines.push("> [!WARNING]", input.injectionNote);
+  }
 
   if (input.privacyMode === "relaxed") {
     // Loud, unmissable, and inside the review itself — not only in the step

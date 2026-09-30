@@ -143,6 +143,7 @@ function summary(overrides: Partial<SummaryInput> = {}): SummaryInput {
     chunksReviewed: 1,
     chunksPlanned: 1,
     failureDetail: null,
+    injectionNote: null,
     ...overrides,
   };
 }

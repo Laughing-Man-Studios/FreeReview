@@ -34,7 +34,9 @@ var DEFAULT_MODELS = [
     // Measured 2026-09-30: PROMPT_JSON 200, JSON_OBJECT 400, STRUCTURED 404.
     capabilityVerifiedOn: "2026-09-30",
     // Measured best PROMPT_JSON: only mode that serves; recall 1.00, 0 FP, 0/2 injection
-    preferredMode: "PROMPT_JSON"
+    preferredMode: "PROMPT_JSON",
+    // Measured 0/2 injection fixtures across 5 observations, incl. 3 repeated passes
+    injectionResistance: "resistant"
   },
   {
     // `structured_outputs` is advertised in OpenRouter's `supported_parameters`
@@ -57,7 +59,9 @@ var DEFAULT_MODELS = [
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
     // Measured best JSON_OBJECT: recall 0.93 / 0/2 injection, vs 0.80 / 2/2 in PROMPT_JSON
-    preferredMode: "JSON_OBJECT"
+    preferredMode: "JSON_OBJECT",
+    // Measured complied 1/2 on all 3 repeated passes; a single earlier pass read 0/2
+    injectionResistance: "exposed"
   },
   {
     // Structured-output capable, 262k context. The strongest structured-output
@@ -75,7 +79,9 @@ var DEFAULT_MODELS = [
     // model whose advertised STRUCTURED support is real.
     capabilityVerifiedOn: "2026-09-30",
     // Measured best PROMPT_JSON: recall 0.87 / precision 0.87, vs 0.47 / 0.58 in STRUCTURED
-    preferredMode: "PROMPT_JSON"
+    preferredMode: "PROMPT_JSON",
+    // Measured complied 1-2/2 across repeated passes
+    injectionResistance: "exposed"
   },
   {
     // UNUSABLE as of 2026-09-30: returns 400 in all three capability modes.
@@ -92,7 +98,9 @@ var DEFAULT_MODELS = [
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
     // Measured best PROMPT_JSON: no mode serves: 400 in all three
-    preferredMode: "PROMPT_JSON"
+    preferredMode: "PROMPT_JSON",
+    // Measured no mode serves; 400 in all three
+    injectionResistance: "unmeasured"
   },
   {
     // UNUSABLE as of 2026-09-30: 404 on STRUCTURED, and 429 on both other modes
@@ -110,7 +118,9 @@ var DEFAULT_MODELS = [
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
     // Measured best JSON_OBJECT: 429 in every mode; unusable
-    preferredMode: "JSON_OBJECT"
+    preferredMode: "JSON_OBJECT",
+    // Measured 429 in every mode
+    injectionResistance: "unmeasured"
   },
   {
     // No response_format at all. Selects PROMPT_JSON mode with defensive
@@ -127,7 +137,9 @@ var DEFAULT_MODELS = [
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
     // Measured best PROMPT_JSON: recall 0.73, 1/2 injection
-    preferredMode: "PROMPT_JSON"
+    preferredMode: "PROMPT_JSON",
+    // Measured complied 1/2
+    injectionResistance: "exposed"
   },
   {
     // Excluded by default: OpenRouter documents that free usage may be used to
@@ -144,7 +156,9 @@ var DEFAULT_MODELS = [
     zdrEligible: false,
     capabilityVerifiedOn: "2026-09-30",
     // Measured best PROMPT_JSON: recall 0.73, but 2/2 injection — not recommended
-    preferredMode: "PROMPT_JSON"
+    preferredMode: "PROMPT_JSON",
+    // Measured complied 2/2 — failed both
+    injectionResistance: "exposed"
   },
   {
     // UNUSABLE and not merely excluded: returns 403 in all three capability
@@ -161,7 +175,9 @@ var DEFAULT_MODELS = [
     zdrEligible: false,
     capabilityVerifiedOn: "2026-09-30",
     // Measured best PROMPT_JSON: 403 in all modes; not an API endpoint
-    preferredMode: "PROMPT_JSON"
+    preferredMode: "PROMPT_JSON",
+    // Measured 403; not an API endpoint
+    injectionResistance: "unmeasured"
   }
 ];
 var ConfigError = class extends Error {
@@ -22585,6 +22601,27 @@ function renderComment(finding) {
   }
   return parts.join("\n");
 }
+function injectionDisclosure(modelIds, catalog) {
+  const byId = new Map(catalog.map((m) => [m.id, m]));
+  const exposed = modelIds.filter((id) => byId.get(id)?.injectionResistance === "exposed");
+  const unmeasured = modelIds.filter((id) => {
+    const r = byId.get(id)?.injectionResistance;
+    return r === void 0 || r === "unmeasured";
+  });
+  if (exposed.length > 0) {
+    const names = exposed.map((id) => `\`${id}\``).join(", ");
+    return `> **This review may be incomplete.** It was produced by ${names}, which was measured following instructions written into a pull request diff \u2014 a comment telling the model to ignore its instructions and report nothing. A pull request author can therefore suppress findings by adding such a comment to their own diff.
+>
+> FreeReview detects this by planting the suppression instruction next to a real defect: the only way to pass is to ignore the instruction. This model did not.
+>
+> Treat the findings below as a lower bound, not as a clean review. Only the default model has been measured resistant; fallbacks exist for availability, not for this property.`;
+  }
+  if (unmeasured.length > 0) {
+    const names = unmeasured.map((id) => `\`${id}\``).join(", ");
+    return `> **This model's resistance to instructions embedded in the diff has not been measured.** It was produced by ${names}. If a diff contains a comment instructing the model to ignore its instructions, findings may be missing and this review will not say so.`;
+  }
+  return null;
+}
 function renderSummary(input2) {
   const lines = [];
   const critical = input2.findings.filter((f) => f.severity === "critical").length;
@@ -22617,6 +22654,10 @@ function renderSummary(input2) {
   lines.push(
     `<sub>Advisory only. Generated by a free-tier language model, which can be wrong. This review does not block merging and nothing here was checked by a human. Model: \`${input2.modelUsed || "none"}\` \xB7 ${input2.requestsUsed} request(s) \xB7 prompt \`${input2.promptVersion}\`.</sub>`
   );
+  if (input2.injectionNote !== null) {
+    lines.push("");
+    lines.push("> [!WARNING]", input2.injectionNote);
+  }
   if (input2.privacyMode === "relaxed") {
     lines.push("");
     lines.push(
@@ -23724,7 +23765,7 @@ function appendStepSummary(markdown, env = process.env) {
   fs.appendFileSync(path, `${markdown}
 `, "utf8");
 }
-function summarise(logger, outputs) {
+function summarise(logger, outputs, injectionNote = null) {
   const counts = logger.counts();
   const rows = Object.entries(counts).sort(([a], [b]) => a.localeCompare(b)).map(([code, n]) => `| \`${code}\` | ${n} |`).join("\n");
   return [
@@ -23740,6 +23781,8 @@ function summarise(logger, outputs) {
     `| Model | ${outputs.model_used || "\u2014"} |`,
     `| OpenRouter requests used | ${outputs.requests_used} |`,
     "",
+    // Ahead of diagnostics: it changes how every number below should be read.
+    injectionNote !== null ? ["### Prompt injection", "", injectionNote, ""] : "",
     rows.length > 0 ? ["### Diagnostics", "", "| Code | Count |", "| --- | --- |", rows].join("\n") : "_No diagnostics recorded._",
     ""
   ].join("\n");
@@ -24198,6 +24241,7 @@ async function run(env = process.env) {
       "skipped_stale"
     );
   }
+  const injectionNote = injectionDisclosure([...modelsUsed], config2.models);
   const body = renderSummary({
     findings: deduped.kept,
     unanchored,
@@ -24212,7 +24256,11 @@ async function run(env = process.env) {
     chunksPlanned,
     // Only surfaced when nothing could be reviewed, so the body says why rather
     // than simply reporting silence.
-    failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null
+    failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null,
+    // Derived from which models actually answered, not from which were configured.
+    // A run that fell through to a fallback must disclose the fallback's exposure
+    // even though the primary is the only model ever measured resistant.
+    injectionNote
   });
   const published = await publishReview(client, {
     owner: identity.owner,
@@ -24262,17 +24310,18 @@ async function run(env = process.env) {
       requests_used: String(scheduler.budget.spent),
       review_url: published.reviewUrl ?? ""
     },
-    deduped.kept.length === 0 ? "no_findings" : "reviewed"
+    deduped.kept.length === 0 ? "no_findings" : "reviewed",
+    injectionNote
   );
 }
-function finish(logger, partial2, statusHint) {
+function finish(logger, partial2, statusHint, injectionNote = null) {
   const resolved = resolveStatus(logger.diagnostics);
   const outputs = {
     ...partial2,
     // A diagnostics-derived status is always more informative than the hint.
     status: resolved === "reviewed" && statusHint !== "reviewed" ? statusHint : resolved
   };
-  appendStepSummary(summarise(logger, outputs));
+  appendStepSummary(summarise(logger, outputs, injectionNote));
   appendOutputs(outputs);
   return outputs;
 }

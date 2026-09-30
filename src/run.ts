@@ -29,7 +29,7 @@ import { anchorKeyFor, resolveAnchors } from "./anchor/resolve.js";
 import { anchoredText, validateFindings, type Candidate } from "./pipeline/validate.js";
 import { dedupe } from "./pipeline/dedupe.js";
 import { confirmHeadUnchanged } from "./pipeline/stale.js";
-import { renderComment, renderSummary } from "./output/comment.js";
+import { injectionDisclosure, renderComment, renderSummary } from "./output/comment.js";
 import { publishReview } from "./github/publish.js";
 import { createLogger, type Diagnostic, type DiagnosticCode, type Logger } from "./diagnostics.js";
 import { GithubClient, GithubError } from "./github/client.js";
@@ -124,7 +124,7 @@ export function appendStepSummary(markdown: string, env: NodeJS.ProcessEnv = pro
   appendFileSync(path, `${markdown}\n`, "utf8");
 }
 
-export function summarise(logger: Logger, outputs: RunOutputs): string {
+export function summarise(logger: Logger, outputs: RunOutputs, injectionNote: string | null = null): string {
   const counts = logger.counts();
   const rows = Object.entries(counts)
     .sort(([a], [b]) => a.localeCompare(b))
@@ -144,6 +144,8 @@ export function summarise(logger: Logger, outputs: RunOutputs): string {
     `| Model | ${outputs.model_used || "—"} |`,
     `| OpenRouter requests used | ${outputs.requests_used} |`,
     "",
+    // Ahead of diagnostics: it changes how every number below should be read.
+    injectionNote !== null ? ["### Prompt injection", "", injectionNote, ""] : "",
     rows.length > 0
       ? ["### Diagnostics", "", "| Code | Count |", "| --- | --- |", rows].join("\n")
       : "_No diagnostics recorded._",
@@ -805,6 +807,11 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
   }
 
   // --- 14. Publish --------------------------------------------------------
+  // Computed once and reused by both the published review and the step summary.
+  // Deriving it in two places would let them drift, and the two audiences are
+  // different: a PR reviewer may never open the workflow run.
+  const injectionNote = injectionDisclosure([...modelsUsed], config.models);
+
   const body = renderSummary({
     findings: deduped.kept,
     unanchored,
@@ -820,6 +827,10 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     // Only surfaced when nothing could be reviewed, so the body says why rather
     // than simply reporting silence.
     failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null,
+    // Derived from which models actually answered, not from which were configured.
+    // A run that fell through to a fallback must disclose the fallback's exposure
+    // even though the primary is the only model ever measured resistant.
+    injectionNote,
   });
 
   const published = await publishReview(client, {
@@ -879,6 +890,7 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
       review_url: published.reviewUrl ?? "",
     },
     deduped.kept.length === 0 ? "no_findings" : "reviewed",
+    injectionNote,
   );
 }
 
@@ -892,6 +904,15 @@ function finish(
   logger: Logger,
   partial: Omit<RunOutputs, "status">,
   statusHint: RunStatus,
+  /**
+   * Prompt-injection disclosure for whichever models actually answered.
+   *
+   * Defaults to null, which is correct for every early-exit path: no model ran,
+   * so there is nothing to disclose. Only the path that completed a review
+   * passes one, so a disclosure can never claim exposure for a model that never
+   * reviewed anything.
+   */
+  injectionNote: string | null = null,
 ): RunOutputs {
   const resolved = resolveStatus(logger.diagnostics);
   const outputs: RunOutputs = {
@@ -899,7 +920,7 @@ function finish(
     // A diagnostics-derived status is always more informative than the hint.
     status: resolved === "reviewed" && statusHint !== "reviewed" ? statusHint : resolved,
   };
-  appendStepSummary(summarise(logger, outputs));
+  appendStepSummary(summarise(logger, outputs, injectionNote));
   appendOutputs(outputs);
   return outputs;
 }
