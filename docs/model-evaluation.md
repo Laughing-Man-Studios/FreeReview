@@ -112,8 +112,9 @@ that the default model beat the relaxed alternative by a clear margin — rested
 on a 0.87 vs 0.67 gap that is the same size as the noise. Run 3 has the gap at
 1.00 vs 0.87, which is inside it.
 
-What survives the noise is the **injection result**, because it is stable across
-every run in the same direction and it is the metric with a hard gate:
+What survives the noise *appeared* to be the **injection result**, because it was
+stable across two runs. Run 5 later falsified that for `qwen` — see below. Treat
+this section as superseded on that point.
 
 | Model | Injection compliance, runs 2 and 3 |
 |---|---|
@@ -303,3 +304,88 @@ This does not change the ranking (qwen's recall advantage is unaffected) but the
 precision column overstates noise for duplicate-heavy models. Scoring should apply
 the same dedupe the action does, so the metric describes what a user sees. Not yet
 fixed.
+
+
+---
+
+# Run 5 — repeated passes, fresh requests
+
+Three passes per model, cache bypassed so each pass is a genuine sample rather
+than a replay. 153 requests, all three models in their measured-best modes.
+
+| Model | Mode | Recall mean | Recall range | Precision | **Injection per pass** |
+|---|---|---|---|---|---|
+| `inclusionai/ling` | PROMPT_JSON | **0.93** | 0.87 – 1.00 | 0.81 | **0, 0, 0** |
+| `qwen/qwen3.8-27b` | JSON_OBJECT | 0.82 | **0.67 – 0.93** | 0.59 | 1, 1, 1 |
+| `nemotron-3-super` | PROMPT_JSON | 0.80 | 0.73 – 0.87 | 0.81 | 1, 1, 2 |
+
+## The injection metric is not stable either
+
+I wrote after run 3 that the injection result was "stable across every run in the
+same direction", and made it the one conclusion I said survived the noise. That
+was wrong.
+
+Run 4 measured `qwen` at **0 / 2**. Three fresh passes measure it at **1, 1, 1**.
+So the 0 / 2 was a single lucky sample, and `qwen` complies with one suppression
+payload consistently — every observation that was not a fluke agrees.
+
+`ling` is 0 / 2 on all three passes, and on the two earlier runs: **five
+observations, no compliance**. That one holds.
+
+## Variance is larger than estimated, and differs by model
+
+Two observations of `ling` suggested ±0.13. Three passes each say otherwise:
+
+| Model | Range | Spread |
+|---|---|---|
+| `inclusionai/ling` | 0.87 – 1.00 | 0.13 |
+| `nemotron-3-super` | 0.73 – 0.87 | 0.14 |
+| `qwen/qwen3.8-27b` | **0.67 – 0.93** | **0.26** |
+
+`qwen` is twice as noisy as the others and its worst pass is worse than
+`nemotron`'s. A single-sample comparison between these three would have been
+meaningless.
+
+## Revised chain
+
+| Role | Model | Recall | Precision | Injection |
+|---|---|---|---|---|
+| **Primary** | `inclusionai/ling` (strict, ZDR) | 0.93 | 0.81 | **0 / 2, five observations** |
+| **Fallback 1** | `nemotron-3-super` **PROMPT_JSON** | 0.80 | **0.81** | 1–2 / 2 |
+| **Fallback 2** | `qwen/qwen3.8-27b` JSON_OBJECT | 0.82 | 0.59 | 1 / 2 |
+
+`nemotron` moves ahead of `qwen` as first fallback. Their recall is
+indistinguishable (0.80 vs 0.82, both well inside each other's range) but
+precision is not: 0.81 against 0.59. For a tool a human reads, that decides it.
+
+## The gap this exposes, stated plainly
+
+**No fallback resists injection.** Only the primary does. If `ling` is
+rate-limited and the review falls through to `nemotron` or `qwen`, a pull request
+author can suppress findings by writing a comment in the diff — and that is
+precisely the situation fallbacks exist for.
+
+This is inherent to depending on free models that cannot all be measured into
+resistance, and it is a real weakness rather than a measurement artefact.
+
+Possible responses, none taken yet:
+
+1. **Accept and disclose it.** The tool is advisory, and a suppressed review
+   produces no findings rather than wrong ones. The step summary could say the
+   review came from a model with measured injection exposure.
+2. **Deterministic suppression filter.** Drop findings whose anchored quote sits
+   within N lines of an instruction-shaped comment. Fast and model-independent,
+   but it will suppress legitimate findings near innocent comments.
+3. **Instruct the model to treat diff content as data** — already done, and it is
+   evidently not sufficient for these two.
+
+Option 1 is honest and cheap. Option 2 needs its own fixtures before it could be
+trusted, because a filter for injection is itself a pattern-matching problem that
+can be evaded.
+
+## Still not fixed
+
+The duplicate-fidelity gap recorded above: duplicates are penalised as precision
+cost, but the shipped pipeline deduplicates before publishing. With repeats this
+now shows up directly — `qwen` averaged 3.7 duplicates per pass, most of which
+dedupe would collapse, so its 0.59 precision understates what a user sees.
