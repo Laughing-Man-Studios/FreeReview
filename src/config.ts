@@ -28,6 +28,17 @@ export interface ModelDefinition {
   readonly supportsResponseFormat: boolean | null;
   readonly supportsJsonSchema: boolean | null;
   /**
+   * When the capability flags above were last checked against the live service.
+   *
+   * `structured_outputs` in OpenRouter's `supported_parameters` is a union across
+   * endpoints and can be wrong: `qwen3.8-27b` advertises it and 404s on every
+   * STRUCTURED request while serving JSON_OBJECT and PROMPT_JSON normally. A
+   * flag believed without a date is a flag nobody has checked, so these record
+   * when a real request last agreed with them. Measured by
+   * `PROBE_MODE=matrix npm run eval:probe`.
+   */
+  readonly capabilityVerifiedOn?: string;
+  /**
    * Last manually-verified endpoint privacy posture. NOT queryable at runtime
    * (the endpoints API is management-key only), so this is a maintenance-time
    * assertion recorded in source. See docs/execution-plan.md §1 item 2.
@@ -82,93 +93,121 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     privacyEligible: true,
     zdrEligible: true,
     privacyVerifiedOn: "2026-09-29",
+    // Measured 2026-09-30: PROMPT_JSON 200, JSON_OBJECT 400, STRUCTURED 404.
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
+    // `structured_outputs` is advertised in OpenRouter's `supported_parameters`
+    // but does NOT work: a STRUCTURED request returns 404 "No endpoints found
+    // that can handle the requested parameters", while JSON_OBJECT and
+    // PROMPT_JSON both return 200.
+    //
+    // Measured twice, 2026-09-30, via `npm run eval:probe` with PROBE_MODE=matrix.
+    // Advertising the flag while the endpoint cannot serve it would route the
+    // action to a mode that 404s, and a 404 names no cause — so this model would
+    // appear broken only when a pull request actually needed it.
     id: "qwen/qwen3.8-27b:free",
     enabled: true,
-    priority: 0,
+    priority: 1,
     maxContextTokens: 262_144,
     supportsResponseFormat: true,
-    supportsJsonSchema: true,
+    supportsJsonSchema: false,
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
     // Structured-output capable, 262k context. The strongest structured-output
     // fallback in the free catalog as of 2026-09-27.
     id: "nvidia/nemotron-3-super-120b-a12b:free",
     enabled: true,
-    priority: 1,
+    priority: 2,
     maxContextTokens: 262_144,
     supportsResponseFormat: true,
     supportsJsonSchema: true,
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
+    // Measured 2026-09-30: 200 in all three capability modes. The only catalog
+    // model whose advertised STRUCTURED support is real.
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
+    // UNUSABLE as of 2026-09-30: returns 400 in all three capability modes.
+    // Retained but disabled so the failure stays documented rather than
+    // silently dropped — if it starts answering, the flag is one edit away.
     id: "liquid/lfm-2.5-2.6b:free",
-    enabled: true,
-    priority: 2,
+    enabled: false,
+    priority: 7,
     maxContextTokens: 65_536,
     supportsResponseFormat: true,
-    supportsJsonSchema: true,
+    supportsJsonSchema: false,
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
-    // Exposes `response_format` but NOT `structured_outputs`, so it cannot be
-    // used with json_schema under `require_parameters: true`. Selects
-    // JSON_OBJECT mode. Small context window.
+    // UNUSABLE as of 2026-09-30: 404 on STRUCTURED, and 429 on both other modes
+    // across two independent matrix runs. A 429 is usually transient, so this is
+    // recorded as "saturated beyond usefulness" rather than "broken" — but a
+    // fallback that is rate-limited every time it is reached is not a fallback.
     id: "google/gemma-4-31b-it:free",
-    enabled: true,
-    priority: 3,
+    enabled: false,
+    priority: 8,
     maxContextTokens: 262_144,
     supportsResponseFormat: true,
     supportsJsonSchema: false,
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
     // No response_format at all. Selects PROMPT_JSON mode with defensive
-    // parsing. 1M context, but no structured-output guarantee.
+    // parsing. 1M context, but no structured-output guarantee. Verified working
+    // 2026-09-30 (JSON_OBJECT and PROMPT_JSON both 200; STRUCTURED 404s).
     id: "nvidia/nemotron-3-ultra-550b-a55b:free",
     enabled: true,
-    priority: 4,
+    priority: 3,
     maxContextTokens: 1_000_000,
     supportsResponseFormat: false,
     supportsJsonSchema: false,
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
     // Excluded by default: OpenRouter documents that free usage may be used to
     // train and improve Poolside models. Retained in code (not removed) so the
-    // model remains available to `privacy_mode: relaxed`.
+    // model remains available to `privacy_mode: relaxed`, where it was verified
+    // working 2026-09-30 (JSON_OBJECT and PROMPT_JSON both 200).
     id: "poolside/laguna-s-2.1:free",
     enabled: false,
-    priority: 5,
+    priority: 4,
     maxContextTokens: 262_144,
     supportsResponseFormat: false,
     supportsJsonSchema: false,
     privacyEligible: false,
     zdrEligible: false,
+    capabilityVerifiedOn: "2026-09-30",
   },
   {
-    // Excluded by default: the free Inkling endpoint documents that prompts and
-    // outputs are logged and used to improve Thinking Machines Lab models.
+    // UNUSABLE and not merely excluded: returns 403 in all three capability
+    // modes with "only available on agentic harnesses". This is not an API
+    // endpoint at all, so it can never serve a pull request review regardless of
+    // privacy mode. Kept for the record only.
     id: "thinkingmachines/inkling-small:free",
     enabled: false,
-    priority: 6,
+    priority: 9,
     maxContextTokens: 1_048_576,
     supportsResponseFormat: false,
     supportsJsonSchema: false,
     privacyEligible: false,
     zdrEligible: false,
+    capabilityVerifiedOn: "2026-09-30",
   },
 ];
 

@@ -41,31 +41,79 @@ describe("each catalog model runs in the mode its capabilities select", () => {
     expect(expectedMode("inclusionai/ling-3.0-flash-sante:free")).toBe("PROMPT_JSON");
   });
 
-  it("gives the structured-output models STRUCTURED, not PROMPT_JSON", () => {
-    // The regression. All three of these were previously forced to PROMPT_JSON by
-    // a hand-built definition that ignored the catalog.
-    for (const id of [
-      "qwen/qwen3.8-27b:free",
-      "nvidia/nemotron-3-super-120b-a12b:free",
-      "liquid/lfm-2.5-2.6b:free",
-    ]) {
-      expect(expectedMode(id), id).toBe("STRUCTURED");
-    }
+  it("gives the genuinely structured-output model STRUCTURED", () => {
+    // Verified against the live service 2026-09-30: nemotron-super returns 200 in
+    // all three capability modes, so STRUCTURED is a real capability, not a hope.
+    expect(expectedMode("nvidia/nemotron-3-super-120b-a12b:free")).toBe("STRUCTURED");
   });
 
-  it("gives a response_format-only model JSON_OBJECT", () => {
-    // `structured_outputs` is absent, so `require_parameters: true` would
-    // exclude every endpoint. JSON_OBJECT is the correct middle ground.
-    expect(expectedMode("google/gemma-4-31b-it:free")).toBe("JSON_OBJECT");
+  it("does NOT give qwen STRUCTURED, despite the catalog advertising structured_outputs", () => {
+    // The second regression, and the more damaging one.
+    //
+    // OpenRouter lists `structured_outputs` in qwen's `supported_parameters`,
+    // but a real STRUCTURED request returns 404 "No endpoints found that can
+    // handle the requested parameters" — measured twice. JSON_OBJECT and
+    // PROMPT_JSON both return 200.
+    //
+    // Believing the advertised flag routed the action to a mode that 404s. The
+    // 404 names no cause, so the model would have looked broken only at the
+    // moment a pull request needed it, as a fallback, which is the worst time to
+    // discover it.
+    expect(expectedMode("qwen/qwen3.8-27b:free")).toBe("JSON_OBJECT");
   });
 
   it("routes models with neither capability to PROMPT_JSON", () => {
     for (const id of [
+      "inclusionai/ling-3.0-flash-sante:free",
       "nvidia/nemotron-3-ultra-550b-a55b:free",
       "poolside/laguna-s-2.1:free",
-      "thinkingmachines/inkling-small:free",
     ]) {
       expect(expectedMode(id), id).toBe("PROMPT_JSON");
+    }
+  });
+
+  it("records when each capability flag was last verified against the service", () => {
+    // A capability flag with no date is a flag nobody has checked. Every model
+    // the probe measured carries the date it was measured.
+    for (const model of DEFAULT_MODELS) {
+      expect(model.capabilityVerifiedOn, `${model.id} has no capabilityVerifiedOn`).toBe("2026-09-30");
+    }
+  });
+});
+
+describe("models the probe found unusable are disabled", () => {
+  const byId = (id: string) => DEFAULT_MODELS.find((m) => m.id === id)!;
+
+  it("disables lfm, which returned 400 in every capability mode", () => {
+    // A 400 in all three modes is not a prompt problem or a shape problem — the
+    // endpoint simply does not answer. Enabled, it would consume a retry budget
+    // and a circuit-breaker slot before failing.
+    expect(byId("liquid/lfm-2.5-2.6b:free").enabled).toBe(false);
+  });
+
+  it("disables gemma, which was rate-limited in both usable modes across two runs", () => {
+    // A 429 is usually transient, which is why this is recorded as saturation
+    // rather than breakage. But a fallback reached *because* a provider is
+    // saturated, and rate-limited every time it is reached, is not a fallback.
+    expect(byId("google/gemma-4-31b-it:free").enabled).toBe(false);
+  });
+
+  it("disables inkling, which is not an API endpoint at all", () => {
+    // 403 in all three modes: "only available on agentic harnesses". No amount of
+    // retrying or relaxing privacy reaches it.
+    expect(byId("thinkingmachines/inkling-small:free").enabled).toBe(false);
+  });
+
+  it("keeps every model the probe found working", () => {
+    // The inverse check: disabling the broken ones must not have swept up a
+    // model that actually answered.
+    for (const id of [
+      "inclusionai/ling-3.0-flash-sante:free",
+      "qwen/qwen3.8-27b:free",
+      "nvidia/nemotron-3-super-120b-a12b:free",
+      "nvidia/nemotron-3-ultra-550b-a55b:free",
+    ]) {
+      expect(byId(id).enabled, `${id} was measured working but is disabled`).toBe(true);
     }
   });
 });
@@ -98,6 +146,12 @@ describe("the evaluation covers the whole candidate field", () => {
     expect(disabled.map((m) => m.id)).toEqual(
       expect.arrayContaining(["poolside/laguna-s-2.1:free", "thinkingmachines/inkling-small:free"]),
     );
+  });
+
+  it("keeps poolside in the measurement field though disabled for shipping", () => {
+    // Disabled on privacy grounds, reachable under `relaxed`, verified working.
+    // Whether it earns a fallback slot is a shipping decision for later.
+    expect(DEFAULT_MODELS.find((m) => m.id === "poolside/laguna-s-2.1:free")?.enabled).toBe(false);
   });
 
   it("marks exactly one model ZDR-capable, since strict mode selects on it", () => {
