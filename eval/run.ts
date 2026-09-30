@@ -47,7 +47,9 @@ import {
 import { findingsFromResponse, jitteredDelay, loadFixture, renderFixtureForEval } from "./lib/harness.js";
 import { DEFAULT_MODELS, loadConfig, OpenRouterClient, Scheduler, buildChatRequest } from "./lib/harness.js";
 import { PROMPT_VERSION } from "../src/prompt/version.js";
+import { reviewModeFor, supportedModesFor } from "../src/config.js";
 import type { ModelDefinition, PrivacyMode } from "../src/config.js";
+import type { CapabilityMode } from "../src/types.js";
 
 /** Requests per minute. Deliberately well under the platform's 20. */
 const EVAL_RPM = 10;
@@ -114,6 +116,10 @@ interface Args {
   readonly maxRequests: number;
   readonly models: readonly string[];
   readonly outDir: string;
+  /** Measure every supported mode, not just the catalog's preference. */
+  readonly sweep: boolean;
+  /** Independent passes per (model, mode), for a spread rather than a point. */
+  readonly repeat: number;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -124,6 +130,8 @@ function parseArgs(argv: readonly string[]): Args {
   // costing three times what it should.
   let maxRequests = 120;
   let outDir = join(import.meta.dirname, "results");
+  let sweep = false;
+  let repeat = 1;
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -132,19 +140,49 @@ function parseArgs(argv: readonly string[]): Args {
     else if (arg === "--out") outDir = argv[++i] ?? outDir;
     else if (arg === "--model") models.push(argv[++i] ?? "");
     else if (arg?.startsWith("--model=")) models.push(arg.slice("--model=".length));
+    else if (arg === "--sweep") sweep = true;
+    else if (arg === "--repeat") repeat = Math.max(1, Number.parseInt(argv[++i] ?? "1", 10));
   }
 
   return {
     noCache,
     maxRequests,
     outDir,
+    sweep,
+    repeat,
     models: models.length > 0 ? models : MODELS.map((m) => m.id),
+  };
+}
+
+/**
+ * Which request shapes to measure for a model.
+ *
+ * In sweep mode this is every shape its capabilities permit, so the catalog's
+ * `preferredMode` can be chosen from data rather than asserted. The catalog only
+ * records that STRUCTURED is *eligible* for `nemotron-3-super`; it cannot know
+ * that STRUCTURED scores 0.47 against PROMPT_JSON's 0.87 until someone spends
+ * the requests. This is the tool that spends them.
+ */
+function modesToMeasure(modelId: string, sweep: boolean): readonly CapabilityMode[] {
+  const definition = definitionFor(modelId);
+  return sweep ? supportedModesFor(definition) : [reviewModeFor(definition)];
+}
+
+/** Force a definition into a specific mode, overriding the catalog preference. */
+function definitionInMode(modelId: string, mode: CapabilityMode): ModelDefinition {
+  const base = definitionFor(modelId);
+  return {
+    ...base,
+    supportsJsonSchema: mode === "STRUCTURED" ? true : false,
+    supportsResponseFormat: mode === "PROMPT_JSON" ? false : true,
+    preferredMode: mode,
   };
 }
 
 interface ModelRun {
   readonly modelId: string;
   readonly privacyMode: PrivacyMode;
+  readonly mode: CapabilityMode;
   readonly scores: FixtureScore[];
   readonly aggregate: AggregateScore;
   readonly requests: number;
@@ -157,6 +195,7 @@ interface ModelRun {
 async function runModel(
   modelId: string,
   privacyMode: PrivacyMode,
+  mode: CapabilityMode,
   args: Args,
   cache: ResponseCache,
   budget: { spent: number },
@@ -175,7 +214,7 @@ async function runModel(
     INPUT_DAILY_RESERVE: "0",
   });
 
-  const definition = definitionFor(modelId);
+  const definition = definitionInMode(modelId, mode);
 
   const client = new OpenRouterClient({ config });
   const scheduler = new Scheduler({ client, config });
@@ -271,6 +310,7 @@ async function runModel(
   return {
     modelId,
     privacyMode,
+    mode,
     scores,
     aggregate: aggregate({ scores, injectionFixtureIds: injectionIds }),
     requests,
@@ -300,28 +340,93 @@ async function main(): Promise<void> {
 
   for (const modelId of args.models) {
     const privacyMode = MODELS.find((m) => m.id === modelId)?.privacyMode ?? "strict";
-    process.stdout.write(`  ${modelId} … `);
 
-    const run = await runModel(modelId, privacyMode, args, cache, budget);
-    runs.push(run);
+    for (const mode of modesToMeasure(modelId, args.sweep)) {
+      // Repeats exist because one pass is not a measurement. Two identical runs
+      // of `ling` differed by 0.13 recall, so a single number cannot separate a
+      // real mode difference from noise. The spread is reported, not averaged
+      // away, because the spread is the finding.
+      for (let pass = 1; pass <= args.repeat; pass += 1) {
+        if (budget.spent >= args.maxRequests) break;
 
-    console.log(
-      `${run.requests} req, ${run.cacheHits} cached` +
-        (run.parseErrors > 0 ? `, ${run.parseErrors} parse errors` : "") +
-        (run.parkedReason === null ? "" : `, PARKED: ${run.parkedReason}`),
-    );
-    console.log(`    ${formatAggregate(run.modelId, run.aggregate)}`);
+        const suffix = args.repeat > 1 ? ` [${mode} pass ${pass}/${args.repeat}]` : ` [${mode}]`;
+        process.stdout.write(`  ${modelId}${suffix} … `);
 
-    if (budget.spent >= args.maxRequests) {
-      console.log(`\n  request ceiling reached (${budget.spent}); stopping.`);
-      break;
+        const run = await runModel(modelId, privacyMode, mode, args, cache, budget);
+        runs.push(run);
+
+        console.log(
+          `${run.requests} req, ${run.cacheHits} cached` +
+            (run.parseErrors > 0 ? `, ${run.parseErrors} parse errors` : "") +
+            (run.parkedReason === null ? "" : `, PARKED: ${run.parkedReason}`),
+        );
+        console.log(
+          `    recall=${run.aggregate.recall.toFixed(2)} precision=${run.aggregate.precision.toFixed(2)} ` +
+            `anchor=${run.aggregate.primaryPlacementRate.toFixed(2)} expl=${run.aggregate.explanationScore.toFixed(2)} ` +
+            `fp=${run.aggregate.falsePositives} dup=${run.aggregate.duplicates} ` +
+            `forbidden=${run.aggregate.forbiddenViolations} injection=${run.aggregate.injectionCompliance}/${run.aggregate.injectionFixtures}`,
+        );
+
+        if (budget.spent >= args.maxRequests) {
+          console.log(`\n  request ceiling reached (${budget.spent}); stopping.`);
+          break;
+        }
+      }
     }
+
+    if (budget.spent >= args.maxRequests) break;
   }
 
   console.log("");
   console.log("  summary");
-  for (const run of runs) {
-    console.log(`    ${formatAggregate(run.modelId, run.aggregate)}`);
+
+  if (args.sweep || args.repeat > 1) {
+    // Group by model+mode so the sweep answer is legible: which mode, and how
+    // much the number moves between passes.
+    const grouped = new Map<string, ModelRun[]>();
+    for (const run of runs) {
+      const key = `${run.modelId} ${run.mode}`;
+      grouped.set(key, [...(grouped.get(key) ?? []), run]);
+    }
+
+    for (const [key, group] of grouped) {
+      const recalls = group.map((g) => g.aggregate.recall);
+      const min = Math.min(...recalls);
+      const max = Math.max(...recalls);
+      const mean = recalls.reduce((a, b) => a + b, 0) / recalls.length;
+      const injections = group.map((g) => g.aggregate.injectionCompliance).join(",");
+
+      console.log(
+        `    ${key.padEnd(56)} recall mean=${mean.toFixed(2)} range=${min.toFixed(2)}-${max.toFixed(2)} ` +
+          `prec=${group[0]!.aggregate.precision.toFixed(2)} injection=${injections}`,
+      );
+    }
+
+    // Where the sweep disagrees with the catalog, say so explicitly. A silent
+    // mismatch is how a hand-maintained preference rots.
+    if (args.sweep) {
+      const catalog = new Map<string, CapabilityMode>();
+      for (const run of runs) {
+        if (!catalog.has(run.modelId)) catalog.set(run.modelId, reviewModeFor(definitionFor(run.modelId)));
+      }
+      console.log("\n  catalog preference vs measured best");
+      for (const run of runs) {
+        const current = catalog.get(run.modelId)!;
+        if (run.mode !== current) continue;
+        const peers = runs.filter((r) => r.modelId === run.modelId);
+        const best = peers.reduce((a, b) => (b.aggregate.recall > a.aggregate.recall ? b : a));
+        if (best.mode !== current && best.aggregate.recall - run.aggregate.recall > 0.05) {
+          console.log(
+            `    ${run.modelId}: catalog says ${current} (recall ${run.aggregate.recall.toFixed(2)}) ` +
+              `but ${best.mode} scored ${best.aggregate.recall.toFixed(2)} — update preferredMode`,
+          );
+        }
+      }
+    }
+  } else {
+    for (const run of runs) {
+      console.log(`    ${formatAggregate(run.modelId, run.aggregate)}`);
+    }
   }
   console.log(
     `  cache ${cache.stats.hits} hits / ${cache.stats.misses} misses / ${cache.stats.writes} writes`,

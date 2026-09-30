@@ -2,7 +2,8 @@ import { describe, expect, it } from "vitest";
 import {
   DEFAULT_MODELS,
   ConfigError,
-  capabilityModeFor,
+  reviewModeFor,
+  supportedModesFor,
   eligibleModels,
   loadConfig,
   validateConfig,
@@ -441,32 +442,115 @@ describe("eligibleModels — privacy filtering", () => {
   });
 });
 
-describe("capabilityModeFor", () => {
-  it("STRUCTURED when the model declares json schema support", () => {
-    expect(capabilityModeFor(model({ supportsJsonSchema: true }))).toBe("STRUCTURED");
+describe("supportedModesFor — capability is a filter, not a ranking", () => {
+  it("offers STRUCTURED first when the model declares json schema support", () => {
+    expect(supportedModesFor(model({ supportsJsonSchema: true }))[0]).toBe("STRUCTURED");
   });
 
-  it("JSON_OBJECT when the model has response_format but not structured_outputs", () => {
-    // This is the Gemma-4 free case: it would 503 under
-    // require_parameters:true with json_schema.
-    expect(
-      capabilityModeFor(
-        model({ supportsJsonSchema: false, supportsResponseFormat: true }),
-      ),
-    ).toBe("JSON_OBJECT");
+  it("offers JSON_OBJECT when response_format exists but structured_outputs does not", () => {
+    expect(supportedModesFor(model({ supportsJsonSchema: false, supportsResponseFormat: true }))[0]).toBe(
+      "JSON_OBJECT",
+    );
   });
 
-  it("PROMPT_JSON when the model declares no response_format", () => {
-    expect(
-      capabilityModeFor(model({ supportsJsonSchema: false, supportsResponseFormat: false })),
-    ).toBe("PROMPT_JSON");
+  it("offers only PROMPT_JSON when neither is declared", () => {
+    expect(supportedModesFor(model({ supportsJsonSchema: false, supportsResponseFormat: false }))).toEqual([
+      "PROMPT_JSON",
+    ]);
   });
 
-  it("PROMPT_JSON when capabilities are unknown (least demanding shape)", () => {
+  it("assumes least-demanding when capabilities are unknown", () => {
     expect(
-      capabilityModeFor(
+      supportedModesFor(
         model({ supportsJsonSchema: null, supportsResponseFormat: null, maxContextTokens: null }),
       ),
-    ).toBe("PROMPT_JSON");
+    ).toEqual(["PROMPT_JSON"]);
+  });
+});
+
+describe("reviewModeFor — a measured preference beats the strongest capability", () => {
+  it("uses the strongest supported mode when nothing has been measured", () => {
+    expect(reviewModeFor(model({ supportsJsonSchema: true }))).toBe("STRUCTURED");
+    expect(reviewModeFor(model({ supportsJsonSchema: false, supportsResponseFormat: true }))).toBe(
+      "JSON_OBJECT",
+    );
+    expect(reviewModeFor(model({ supportsJsonSchema: false, supportsResponseFormat: false }))).toBe(
+      "PROMPT_JSON",
+    );
+  });
+
+  it("prefers a measured mode over a stronger advertised capability", () => {
+    // The finding that replaced the strongest-capability rule. `nemotron-3-super`
+    // really does support STRUCTURED, and STRUCTURED scored recall 0.47 against
+    // 0.87 in PROMPT_JSON on the same fixtures. Taking the strongest capability
+    // would have shipped the 0.47.
+    const nemotron = model({
+      supportsJsonSchema: true,
+      supportsResponseFormat: true,
+      preferredMode: "PROMPT_JSON",
+    });
+    expect(reviewModeFor(nemotron)).toBe("PROMPT_JSON");
+  });
+
+  it("prefers JSON_OBJECT for qwen, which is better there than STRUCTURED", () => {
+    // qwen advertises structured_outputs but 404s on it, and its recall and
+    // injection resistance both improve in JSON_OBJECT over PROMPT_JSON.
+    const qwen = model({
+      supportsJsonSchema: false,
+      supportsResponseFormat: true,
+      preferredMode: "JSON_OBJECT",
+    });
+    expect(reviewModeFor(qwen)).toBe("JSON_OBJECT");
+  });
+
+  it("ignores a preferred mode the model cannot serve", () => {
+    // A contradiction here would route the action to a shape that 404s, and a
+    // 404 names no cause — so it would surface only when a pull request needed
+    // reviewing and the primary model had already failed.
+    const broken = model({
+      supportsJsonSchema: false,
+      supportsResponseFormat: false,
+      preferredMode: "STRUCTURED",
+    });
+    expect(reviewModeFor(broken)).toBe("PROMPT_JSON");
+  });
+
+  it("degrades to the strongest supported mode when the preference is unsupported", () => {
+    const broken = model({
+      supportsJsonSchema: true,
+      supportsResponseFormat: true,
+      preferredMode: "JSON_OBJECT",
+    });
+    // JSON_OBJECT *is* supported here, so it is honoured.
+    expect(reviewModeFor(broken)).toBe("JSON_OBJECT");
+
+    const worse = model({
+      supportsJsonSchema: false,
+      supportsResponseFormat: false,
+      preferredMode: "JSON_OBJECT",
+    });
+    expect(reviewModeFor(worse)).toBe("PROMPT_JSON");
+  });
+});
+
+describe("the catalog's chosen modes are internally consistent", () => {
+  it("never prefers a mode a model cannot serve", () => {
+    for (const entry of DEFAULT_MODELS) {
+      const supported = supportedModesFor(entry);
+      if (entry.preferredMode !== undefined) {
+        expect(supported, `${entry.id} prefers ${entry.preferredMode} but supports ${supported.join(",")}`).toContain(
+          entry.preferredMode,
+        );
+      }
+    }
+  });
+
+  it("gives every catalog model a measured preference", () => {
+    // Every entry was swept on 2026-09-30. A missing preference means the
+    // strongest-capability fallback is in play, which is the rule that shipped
+    // the 0.47.
+    for (const entry of DEFAULT_MODELS) {
+      expect(entry.preferredMode, `${entry.id} has no measured preferredMode`).toBeDefined();
+    }
   });
 });

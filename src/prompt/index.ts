@@ -16,7 +16,7 @@
 import { buildSystemPrompt } from "./system.js";
 import { buildUserMessage } from "./user.js";
 import { FINDINGS_SCHEMA_NAME, findingsJsonSchema } from "../schema/json-schema.js";
-import { capabilityModeFor, type ModelDefinition } from "../config.js";
+import { reviewModeFor, type ModelDefinition } from "../config.js";
 import { parseFindingsResponse, type ParseResult } from "../parse/repair.js";
 import type { ChatMessage, ChatRequest, JsonSchemaDefinition } from "../llm/client.js";
 import type { CapabilityMode } from "../types.js";
@@ -43,11 +43,12 @@ export const FINDINGS_SCHEMA: JsonSchemaDefinition = {
 /**
  * Whether the model needs a strict JSON schema, only `json_object`, or neither.
  *
- * Delegates to the same `capabilityModeFor` the config layer uses, so there is
- * one answer to "what can this model do" rather than two that can disagree.
+ * Delegates to the same `reviewModeFor` the config layer uses, so there is
+ * one answer to "what shape does this model get" rather than two that can disagree.
+ * Capability filters which shapes are eligible; a measured preference picks one.
  */
 export function modeForModel(model: ModelDefinition): CapabilityMode {
-  return capabilityModeFor(model);
+  return reviewModeFor(model);
 }
 
 /**

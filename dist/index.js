@@ -32,7 +32,9 @@ var DEFAULT_MODELS = [
     zdrEligible: true,
     privacyVerifiedOn: "2026-09-29",
     // Measured 2026-09-30: PROMPT_JSON 200, JSON_OBJECT 400, STRUCTURED 404.
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best PROMPT_JSON: only mode that serves; recall 1.00, 0 FP, 0/2 injection
+    preferredMode: "PROMPT_JSON"
   },
   {
     // `structured_outputs` is advertised in OpenRouter's `supported_parameters`
@@ -40,7 +42,7 @@ var DEFAULT_MODELS = [
     // that can handle the requested parameters", while JSON_OBJECT and
     // PROMPT_JSON both return 200.
     //
-    // Measured twice, 2026-09-30, via `npm run eval:probe` with PROBE_MODE=matrix.
+    // Measured twice, 2026-09-30, by the eval capability matrix.
     // Advertising the flag while the endpoint cannot serve it would route the
     // action to a mode that 404s, and a 404 names no cause — so this model would
     // appear broken only when a pull request actually needed it.
@@ -53,7 +55,9 @@ var DEFAULT_MODELS = [
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best JSON_OBJECT: recall 0.93 / 0/2 injection, vs 0.80 / 2/2 in PROMPT_JSON
+    preferredMode: "JSON_OBJECT"
   },
   {
     // Structured-output capable, 262k context. The strongest structured-output
@@ -69,7 +73,9 @@ var DEFAULT_MODELS = [
     privacyVerifiedOn: "2026-09-29",
     // Measured 2026-09-30: 200 in all three capability modes. The only catalog
     // model whose advertised STRUCTURED support is real.
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best PROMPT_JSON: recall 0.87 / precision 0.87, vs 0.47 / 0.58 in STRUCTURED
+    preferredMode: "PROMPT_JSON"
   },
   {
     // UNUSABLE as of 2026-09-30: returns 400 in all three capability modes.
@@ -84,7 +90,9 @@ var DEFAULT_MODELS = [
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best PROMPT_JSON: no mode serves: 400 in all three
+    preferredMode: "PROMPT_JSON"
   },
   {
     // UNUSABLE as of 2026-09-30: 404 on STRUCTURED, and 429 on both other modes
@@ -100,7 +108,9 @@ var DEFAULT_MODELS = [
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best JSON_OBJECT: 429 in every mode; unusable
+    preferredMode: "JSON_OBJECT"
   },
   {
     // No response_format at all. Selects PROMPT_JSON mode with defensive
@@ -115,7 +125,9 @@ var DEFAULT_MODELS = [
     privacyEligible: true,
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best PROMPT_JSON: recall 0.73, 1/2 injection
+    preferredMode: "PROMPT_JSON"
   },
   {
     // Excluded by default: OpenRouter documents that free usage may be used to
@@ -130,7 +142,9 @@ var DEFAULT_MODELS = [
     supportsJsonSchema: false,
     privacyEligible: false,
     zdrEligible: false,
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best PROMPT_JSON: recall 0.73, but 2/2 injection — not recommended
+    preferredMode: "PROMPT_JSON"
   },
   {
     // UNUSABLE and not merely excluded: returns 403 in all three capability
@@ -145,7 +159,9 @@ var DEFAULT_MODELS = [
     supportsJsonSchema: false,
     privacyEligible: false,
     zdrEligible: false,
-    capabilityVerifiedOn: "2026-09-30"
+    capabilityVerifiedOn: "2026-09-30",
+    // Measured best PROMPT_JSON: 403 in all modes; not an API endpoint
+    preferredMode: "PROMPT_JSON"
   }
 ];
 var ConfigError = class extends Error {
@@ -347,12 +363,20 @@ function eligibleModels(config2) {
     return a.priority - b.priority;
   });
 }
-function capabilityModeFor(model) {
-  if (model.supportsJsonSchema === true) return "STRUCTURED";
-  if (model.supportsResponseFormat === true) return "JSON_OBJECT";
-  if (model.supportsJsonSchema === false) return "PROMPT_JSON";
-  if (model.supportsResponseFormat === false) return "PROMPT_JSON";
-  return "PROMPT_JSON";
+function supportedModesFor(model) {
+  if (model.supportsJsonSchema === true) return ["STRUCTURED", "JSON_OBJECT", "PROMPT_JSON"];
+  if (model.supportsResponseFormat === true) return ["JSON_OBJECT", "PROMPT_JSON"];
+  return ["PROMPT_JSON"];
+}
+function strongestSupportedMode(model) {
+  return supportedModesFor(model)[0];
+}
+function reviewModeFor(model) {
+  const preferred = model.preferredMode;
+  if (preferred !== void 0 && supportedModesFor(model).includes(preferred)) {
+    return preferred;
+  }
+  return strongestSupportedMode(model);
 }
 
 // src/llm/errors.ts
@@ -21850,7 +21874,7 @@ var FINDINGS_SCHEMA = {
   schema: findingsJsonSchema
 };
 function modeForModel(model) {
-  return capabilityModeFor(model);
+  return reviewModeFor(model);
 }
 function buildChatRequest(rendered, model, maxOutputTokens) {
   const mode = modeForModel(model);
@@ -23885,7 +23909,7 @@ async function run(env = process.env) {
   }
   const catalog = await fetchCatalog();
   const usableModels = eligibleModels(config2).filter((model) => {
-    const mode = capabilityModeFor(model);
+    const mode = reviewModeFor(model);
     const entry = evaluateModel(model, catalog, {
       inputTokens: config2.maxInputTokens,
       outputTokens: config2.maxOutputTokens,

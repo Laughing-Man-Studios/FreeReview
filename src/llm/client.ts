@@ -37,7 +37,7 @@
  */
 
 import type { Config } from "../config.js";
-import { capabilityModeFor, type ModelDefinition } from "../config.js";
+import { reviewModeFor, type ModelDefinition } from "../config.js";
 import type { CapabilityMode, RawFindingsResponse } from "../types.js";
 import { emptyOutputReason, errorFromBody, isErrorBody, OpenRouterError } from "./errors.js";
 
@@ -344,7 +344,7 @@ async function readJson(response: Response): Promise<unknown> {
   }
 }
 
-/** Which request shape this model needs, from its declared capabilities. */
+/** Which request shape to send this model: a measured preference, else capability. */
 export function modeFor(model: ModelDefinition): CapabilityMode {
-  return capabilityModeFor(model);
+  return reviewModeFor(model);
 }

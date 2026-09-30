@@ -21,7 +21,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { capabilityModeFor, DEFAULT_MODELS } from "../../src/config.js";
+import { reviewModeFor, supportedModesFor, DEFAULT_MODELS } from "../../src/config.js";
 import type { CapabilityMode } from "../../src/types.js";
 
 /**
@@ -32,7 +32,7 @@ import type { CapabilityMode } from "../../src/types.js";
 function expectedMode(modelId: string): CapabilityMode {
   const model = DEFAULT_MODELS.find((m) => m.id === modelId);
   if (model === undefined) throw new Error(`${modelId} is not in the catalog`);
-  return capabilityModeFor(model);
+  return reviewModeFor(model);
 }
 
 describe("each catalog model runs in the mode its capabilities select", () => {
@@ -41,10 +41,14 @@ describe("each catalog model runs in the mode its capabilities select", () => {
     expect(expectedMode("inclusionai/ling-3.0-flash-sante:free")).toBe("PROMPT_JSON");
   });
 
-  it("gives the genuinely structured-output model STRUCTURED", () => {
-    // Verified against the live service 2026-09-30: nemotron-super returns 200 in
-    // all three capability modes, so STRUCTURED is a real capability, not a hope.
-    expect(expectedMode("nvidia/nemotron-3-super-120b-a12b:free")).toBe("STRUCTURED");
+  it("gives nemotron-super PROMPT_JSON, despite STRUCTURED being genuinely available", () => {
+    // The measurement that retired the strongest-capability rule. STRUCTURED is a
+    // real, working capability here — it returns 200 — and it scored recall 0.47
+    // against 0.87 in PROMPT_JSON on the same fixtures. Schema-constrained output
+    // produced quotes that would not anchor to the diff.
+    //
+    // The default policy would have selected STRUCTURED and shipped the 0.47.
+    expect(expectedMode("nvidia/nemotron-3-super-120b-a12b:free")).toBe("PROMPT_JSON");
   });
 
   it("does NOT give qwen STRUCTURED, despite the catalog advertising structured_outputs", () => {
@@ -118,21 +122,26 @@ describe("models the probe found unusable are disabled", () => {
   });
 });
 
-describe("no model is silently measured in a mode weaker than it supports", () => {
+describe("no model is sent a mode it cannot serve", () => {
   it("holds for every catalog entry", () => {
+    // The one invariant that must never break. A model asked for a shape its
+    // endpoint cannot serve returns 404 with no stated cause, so the failure
+    // would surface only when a pull request needed reviewing and the primary
+    // model had already failed — the exact moment the fallback exists for.
     for (const model of DEFAULT_MODELS) {
-      const mode = capabilityModeFor(model);
-
-      if (model.supportsJsonSchema === true) {
-        expect(mode, `${model.id} supports json_schema but selected ${mode}`).toBe("STRUCTURED");
-      }
-      if (model.supportsResponseFormat === true && model.supportsJsonSchema !== true) {
-        expect(mode, `${model.id} supports response_format but selected ${mode}`).toBe("JSON_OBJECT");
-      }
-      if (model.supportsJsonSchema === false && model.supportsResponseFormat === false) {
-        expect(mode, `${model.id} supports neither but selected ${mode}`).toBe("PROMPT_JSON");
-      }
+      expect(supportedModesFor(model), `${model.id} selected ${reviewModeFor(model)}`).toContain(
+        reviewModeFor(model),
+      );
     }
+  });
+
+  it("covers the model whose advertised capability does not work", () => {
+    // qwen advertises structured_outputs and 404s on every STRUCTURED request.
+    // That combination was the production bug, so it is worth pinning: if the
+    // flag is ever restored from the advertised metadata, this fails.
+    const qwen = DEFAULT_MODELS.find((m) => m.id === "qwen/qwen3.8-27b:free")!;
+    expect(qwen.supportsJsonSchema).toBe(false);
+    expect(reviewModeFor(qwen)).not.toBe("STRUCTURED");
   });
 });
 

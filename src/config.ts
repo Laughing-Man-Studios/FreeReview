@@ -34,10 +34,23 @@ export interface ModelDefinition {
    * endpoints and can be wrong: `qwen3.8-27b` advertises it and 404s on every
    * STRUCTURED request while serving JSON_OBJECT and PROMPT_JSON normally. A
    * flag believed without a date is a flag nobody has checked, so these record
-   * when a real request last agreed with them. Measured by
-   * `PROBE_MODE=matrix npm run eval:probe`.
+   * when a real request last agreed with them. Measured by the
+   * eval capability matrix (`PROBE_MODE=matrix`).
    */
   readonly capabilityVerifiedOn?: string;
+  /**
+   * The request shape to use, chosen by measuring review quality in each working
+   * mode rather than by taking the strongest one advertised.
+   *
+   * Measured 2026-09-30 against the Stage A dataset. These two entries disagree
+   * with the strongest-capability rule in opposite directions — `qwen` is better
+   * in JSON_OBJECT than STRUCTURED, `nemotron-3-super` is much worse in
+   * STRUCTURED than PROMPT_JSON — which is why the rule had to go.
+   *
+   * Absent means "nobody has measured it", and the strongest supported mode is
+   * used. Set it whenever a sweep has been run.
+   */
+  readonly preferredMode?: CapabilityMode;
   /**
    * Last manually-verified endpoint privacy posture. NOT queryable at runtime
    * (the endpoints API is management-key only), so this is a maintenance-time
@@ -95,14 +108,16 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     privacyVerifiedOn: "2026-09-29",
     // Measured 2026-09-30: PROMPT_JSON 200, JSON_OBJECT 400, STRUCTURED 404.
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best PROMPT_JSON: only mode that serves; recall 1.00, 0 FP, 0/2 injection
+    preferredMode: "PROMPT_JSON",},
   {
     // `structured_outputs` is advertised in OpenRouter's `supported_parameters`
     // but does NOT work: a STRUCTURED request returns 404 "No endpoints found
     // that can handle the requested parameters", while JSON_OBJECT and
     // PROMPT_JSON both return 200.
     //
-    // Measured twice, 2026-09-30, via `npm run eval:probe` with PROBE_MODE=matrix.
+    // Measured twice, 2026-09-30, by the eval capability matrix.
     // Advertising the flag while the endpoint cannot serve it would route the
     // action to a mode that 404s, and a 404 names no cause — so this model would
     // appear broken only when a pull request actually needed it.
@@ -116,7 +131,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best JSON_OBJECT: recall 0.93 / 0/2 injection, vs 0.80 / 2/2 in PROMPT_JSON
+    preferredMode: "JSON_OBJECT",},
   {
     // Structured-output capable, 262k context. The strongest structured-output
     // fallback in the free catalog as of 2026-09-27.
@@ -132,7 +149,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     // Measured 2026-09-30: 200 in all three capability modes. The only catalog
     // model whose advertised STRUCTURED support is real.
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best PROMPT_JSON: recall 0.87 / precision 0.87, vs 0.47 / 0.58 in STRUCTURED
+    preferredMode: "PROMPT_JSON",},
   {
     // UNUSABLE as of 2026-09-30: returns 400 in all three capability modes.
     // Retained but disabled so the failure stays documented rather than
@@ -147,7 +166,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best PROMPT_JSON: no mode serves: 400 in all three
+    preferredMode: "PROMPT_JSON",},
   {
     // UNUSABLE as of 2026-09-30: 404 on STRUCTURED, and 429 on both other modes
     // across two independent matrix runs. A 429 is usually transient, so this is
@@ -163,7 +184,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best JSON_OBJECT: 429 in every mode; unusable
+    preferredMode: "JSON_OBJECT",},
   {
     // No response_format at all. Selects PROMPT_JSON mode with defensive
     // parsing. 1M context, but no structured-output guarantee. Verified working
@@ -178,7 +201,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     zdrEligible: false,
     privacyVerifiedOn: "2026-09-29",
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best PROMPT_JSON: recall 0.73, 1/2 injection
+    preferredMode: "PROMPT_JSON",},
   {
     // Excluded by default: OpenRouter documents that free usage may be used to
     // train and improve Poolside models. Retained in code (not removed) so the
@@ -193,7 +218,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     privacyEligible: false,
     zdrEligible: false,
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best PROMPT_JSON: recall 0.73, but 2/2 injection — not recommended
+    preferredMode: "PROMPT_JSON",},
   {
     // UNUSABLE and not merely excluded: returns 403 in all three capability
     // modes with "only available on agentic harnesses". This is not an API
@@ -208,7 +235,9 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     privacyEligible: false,
     zdrEligible: false,
     capabilityVerifiedOn: "2026-09-30",
-  },
+  
+    // Measured best PROMPT_JSON: 403 in all modes; not an API endpoint
+    preferredMode: "PROMPT_JSON",},
 ];
 
 export interface Config {
@@ -541,12 +570,70 @@ export function eligibleModels(config: Config): ModelDefinition[] {
  * `require_parameters: true` must only be sent alongside `json_schema`;
  * sending it otherwise excludes every endpoint and yields a 503 for free.
  */
-export function capabilityModeFor(model: ModelDefinition): CapabilityMode {
-  if (model.supportsJsonSchema === true) return "STRUCTURED";
-  if (model.supportsResponseFormat === true) return "JSON_OBJECT";
-  if (model.supportsJsonSchema === false) return "PROMPT_JSON";
-  if (model.supportsResponseFormat === false) return "PROMPT_JSON";
-  // Unknown: assume the least demanding shape. The catalog probe upgrades this
-  // before the first request in practice.
-  return "PROMPT_JSON";
+/**
+ * The request shapes a model could plausibly be asked for.
+ *
+ * This is a *capability* filter and nothing more: it answers "which shapes might
+ * this endpoint serve", never "which shape reviews best". Those are different
+ * questions, and conflating them is what produced the measured results below.
+ */
+export function supportedModesFor(model: ModelDefinition): readonly CapabilityMode[] {
+  if (model.supportsJsonSchema === true) return ["STRUCTURED", "JSON_OBJECT", "PROMPT_JSON"];
+  if (model.supportsResponseFormat === true) return ["JSON_OBJECT", "PROMPT_JSON"];
+  return ["PROMPT_JSON"];
+}
+
+/**
+ * The strongest mode a model could serve, ignoring whether it reviews well.
+ *
+ * Retained as the fallback for a model with no measured preference. Preferring
+ * the strongest shape is the best guess available when nobody has measured.
+ */
+function strongestSupportedMode(model: ModelDefinition): CapabilityMode {
+  return supportedModesFor(model)[0]!;
+}
+
+/**
+ * Which request shape to actually send this model.
+ *
+ * ## Capability is a filter, not a ranking
+ *
+ * The obvious policy — send the strongest shape a model advertises — is wrong,
+ * and measurably so. Same models, same fixtures, same prompt, 2026-09-30:
+ *
+ *   qwen/qwen3.8-27b      PROMPT_JSON  recall 0.80  injection 2/2
+ *                         JSON_OBJECT  recall 0.93  injection 0/2
+ *
+ *   nemotron-3-super      PROMPT_JSON  recall 0.87  precision 0.87
+ *                         STRUCTURED   recall 0.47  precision 0.58
+ *
+ * The two move in opposite directions, each by more than the gap between any two
+ * models. `nemotron-3-super` genuinely supports STRUCTURED, and STRUCTURED is
+ * worse for it by nearly half — schema-constrained output produced quotes that
+ * would not anchor to the diff. `qwen` gains a full swing on injection
+ * resistance purely by moving to a shape the API enforces.
+ *
+ * The default model out of the box picked STRUCTURED for `nemotron-3-super` and
+ * would have shipped the 0.47.
+ *
+ * So the mode is a measured property of the model, recorded in the catalog as
+ * `preferredMode`. Capabilities decide which modes are *eligible*; measurement
+ * decides which is *chosen*.
+ *
+ * ## The contradiction guard
+ *
+ * A `preferredMode` the model cannot actually serve is a catalog bug, and the
+ * failure it causes is the worst kind: a 404 that names no cause, discovered
+ * only when a pull request needs reviewing and the primary model has already
+ * failed. So an unsupported preference degrades to the strongest mode the model
+ * *can* serve rather than being trusted.
+ */
+export function reviewModeFor(model: ModelDefinition): CapabilityMode {
+  const preferred = model.preferredMode;
+
+  if (preferred !== undefined && supportedModesFor(model).includes(preferred)) {
+    return preferred;
+  }
+
+  return strongestSupportedMode(model);
 }

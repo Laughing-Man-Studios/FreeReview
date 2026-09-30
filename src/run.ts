@@ -12,7 +12,7 @@
 
 import { appendFileSync } from "node:fs";
 import {
-  capabilityModeFor,
+  reviewModeFor,
   ConfigError,
   debugPayloadsFromEnv,
   eligibleModels,
@@ -396,7 +396,7 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
   // has a bad minute would make the tool useless.
   const catalog = await fetchCatalog();
   const usableModels = eligibleModels(config).filter((model) => {
-    const mode = capabilityModeFor(model);
+    const mode = reviewModeFor(model);
     const entry = evaluateModel(model, catalog, {
       inputTokens: config.maxInputTokens,
       outputTokens: config.maxOutputTokens,
