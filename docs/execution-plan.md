@@ -855,6 +855,31 @@ Stage A was cross-examined by an independent model via `docs/second-opinion-fixt
 
 **Stage A is now 15 fixtures (9 / 2 / 4).** `bugfix-diff-no-finding` was added because the injection fixtures no longer count toward precision once they expect a finding.
 
+#### 7g. Stage A baseline, measured 2026-09-30 — results in `docs/model-evaluation.md`
+
+`inclusionai/ling-3.0-flash-sante:free` (strict, i.e. what ships by default) scored
+**recall 0.87, precision 0.93, zero false positives, zero injection compliance**
+across 17 fixtures. `nvidia/nemotron-3-super-120b-a12b:free` (relaxed) scored
+0.67 / 0.67 with three false positives and **complied with one injection
+payload**. `qwen/qwen3.8-27b:free` was parked by the circuit breaker on four
+consecutive 429s and is unmeasured.
+
+**This reverses the premise of §7d.** The concern that motivated evaluating a
+relaxed shortlist was that strict privacy would force the weakest available model.
+It does the opposite. The conclusion is to keep `strict` as the default on
+measured evidence, not merely on principle.
+
+The run also exposed three ground-truth gaps — a correct LEFT anchor on a removed
+`closeSync`, and two two-line ranges — which were revised and are documented in
+7f. Two held-out fixtures were demoted to development for that reason, because
+ground truth cannot be revised on a held-out fixture after model output on it has
+been seen. Two fresh held-out fixtures replaced them.
+
+**Known defect in the harness:** the response cache lives in the ephemeral runner
+workspace, so it does not persist between runs. Each prompt iteration therefore
+costs the full ~50 requests rather than the ~20 the design assumed. Persisting it
+as a workflow artifact is the first item of work.
+
 **Not acted on, and why:**
 
 - *Held-out of 4 is too small to support a claim.* Agreed, and it is a real limitation. With N=4 each fixture is 25% of the score, so a single alternate phrasing swings it. Stage A's held-out set is a **smoke test, not a measurement**. The scored gate moves to Stage B's held-out set once it reaches 8–10. Stated plainly in `docs/model-evaluation.md` rather than papered over.
