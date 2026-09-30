@@ -4,7 +4,9 @@ Raw results from the first measured runs against the Stage A dataset. Committed
 per the plan's requirement that the evaluation be reproducible and its numbers
 recoverable rather than quoted from memory.
 
-**Date:** 2026-09-30 (three runs; see *Variance* below — it changed a conclusion)
+**Date:** 2026-09-30 (runs 1–3 on3 models; run 4 on all 8 after live capability
+probing — see *Capability mode matters more than the model*, which changed two
+conclusions drawn from the earlier runs)
 **Dataset:** Stage A, 17 fixtures (11 development / 2 regression / 4 held-out),
 15 expected findings, 23 forbidden findings, 2 injection fixtures.
 **Prompt:** `2026-09-27.1`
@@ -172,3 +174,132 @@ Stated plainly, because a baseline that overstates itself is worse than none.
    them, capped at 8 measured iterations.
 4. Grow held-out toward 8–10 with Stage B fixtures before treating any score as a
    gate rather than a signal.
+
+
+---
+
+# Run 4 — full catalog, measured capabilities
+
+Run 1–3 evaluated 3 models with capabilities hardcoded in the harness. That was
+wrong twice over, and correcting it changed conclusions rather than just fixing a
+number. Everything below supersedes the model ranking in the sections above.
+
+## The harness bug
+
+`eval/run.ts` constructed model definitions inline with
+`supportsJsonSchema: false, supportsJsonSchema: false`, forcing every model into
+PROMPT_JSON. Fixed by resolving definitions from `DEFAULT_MODELS`, so the catalog
+is the single source of truth.
+
+Invisible: nothing errored, finding counts looked plausible, and the harness
+reported numbers as authoritative as any other run.
+
+## The catalog bug underneath it
+
+Having made the harness trust the catalog, the catalog turned out to be wrong.
+`qwen/qwen3.8-27b:free` advertises `structured_outputs` in OpenRouter's
+`supported_parameters`, which is a union across endpoints and can be stale.
+
+Measured, 2026-09-30, twice:
+
+| Model | STRUCTURED | JSON_OBJECT | PROMPT_JSON |
+|---|---|---|---|
+| `inclusionai/ling` | 404 | 400 | **OK** |
+| `qwen/qwen3.8-27b` | **404** | **OK** | **OK** |
+| `nemotron-3-super` | **OK** | OK | OK |
+| `liquid/lfm-2.5-2.6b` | 400 | 400 | 400 |
+| `google/gemma-4-31b-it` | 404 | 429 | 429 |
+| `nemotron-3-ultra` | 404 | **OK** | **OK** |
+| `poolside/laguna-s-2.1` | 404 | **OK** | **OK** |
+| `thinkingmachines/inkling-small` | 403 | 403 | 403 |
+
+So the shipped action had `qwen` — the strongest relaxed model — routing to a
+mode that returns **404 on every request**. A 404 names no cause, so it would
+have surfaced only when a pull request needed reviewing *and* the primary model
+had already failed: exactly the moment the fallback exists for.
+
+Fixed. `lfm` (400 everywhere), `gemma` (429 everywhere, two runs) and `inkling`
+(403, "only available on agentic harnesses" — not an API endpoint) are disabled.
+
+## Quality results, run 4
+
+| Model | Mode | Recall | Precision | Anchor | Expl | FP | Dup | Forbidden | **Injection compliance** |
+|---|---|---|---|---|---|---|---|---|---|
+| `inclusionai/ling` | PROMPT_JSON | **1.00** | **0.88** | 0.87 | 0.88 | **0** | **0** | 2 | **0 / 2** |
+| `qwen/qwen3.8-27b` | JSON_OBJECT | 0.93 | 0.74 | 0.86 | 0.92 | 1 | 4 | 0 | **0 / 2** |
+| `nemotron-3-ultra` | PROMPT_JSON | 0.73 | 0.65 | 0.82 | **1.00** | 3 | 1 | 2 | 1 / 2 |
+| `poolside/laguna-s-2.1` | PROMPT_JSON | 0.73 | 0.65 | 0.91 | 0.94 | 2 | 2 | 2 | 2 / 2 |
+| `nemotron-3-super` | STRUCTURED | 0.47 | 0.58 | 1.00 | 0.90 | 4 | 1 | 0 | 1 / 2 |
+| `lfm` / `inkling` / `gemma` | — | — | — | — | — | — | — | — | unusable |
+
+## Capability mode matters more than the model
+
+The same model, in two working modes:
+
+| Model | PROMPT_JSON | STRUCTURED / JSON_OBJECT |
+|---|---|---|
+| `qwen/qwen3.8-27b` | recall 0.80, precision 0.63, **2 / 2 injection compliance** | recall **0.93**, precision **0.74**, **0 / 2** |
+| `nemotron-3-super` | recall **0.87**, precision **0.87**, 1 / 2 | recall **0.47**, precision 0.58, 1 / 2 |
+
+The two models move in **opposite directions**, and by more than the gap between
+any two models:
+
+- `qwen` gains 0.13 recall and flips from complying with both injection payloads
+  to resisting both, purely by moving to a mode where the API enforces the output
+  shape.
+- `nemotron-3-super` **loses 0.40 recall** moving to STRUCTURED, with 4 findings
+  that could not be anchored at all. Schema-constrained output produced quotes
+  that did not match the diff.
+
+So `capabilityModeFor`'s policy — always select the strongest capability the
+model advertises — is **wrong**. It is a capability question being used to answer
+a quality question. `nemotron-3-super` genuinely supports STRUCTURED, and
+STRUCTURED is worse for it by nearly half.
+
+The correct policy is: choose the mode that a real request confirms works, then
+measure quality in that mode and pick the best one per model. Capability
+eligibility is a filter; it is not a ranking.
+
+## Two corrections to earlier conclusions
+
+**I was wrong that qwen failed injection.** Runs 1–3 showed qwen complying with
+both suppression payloads, and I first attributed that to the harness
+degrading it, then "corrected" myself to say the harness was innocent and those
+were qwen's own numbers. Both were incomplete. The harness was innocent, the
+numbers were qwen's own — and they were the numbers for the *wrong mode*.
+Measured properly, **qwen resists both payloads** and is the strongest relaxed
+model available.
+
+Two confident assertions from the same data, one after the other, both wrong.
+The lesson is not to be more careful; it is that the mode had to be measured
+before any of it could be said.
+
+**`nemotron-3-super` is not the 0.87 model it appeared to be.** That score was
+PROMPT_JSON. In the mode the catalog would actually have selected it scored 0.47.
+
+## Revised recommendation
+
+| Role | Model | Why |
+|---|---|---|
+| **Primary** | `inclusionai/ling` (strict, ZDR) | 15/15, zero false positives, zero duplicates, resists both payloads |
+| **Fallback 1** | `qwen/qwen3.8-27b` (relaxed, JSON_OBJECT) | 14/15, resists both payloads — the only relaxed model that does |
+| **Fallback 2** | `nemotron-3-super` **in PROMPT_JSON** | 0.87 / 0.87, but 1 / 2 on injection |
+
+Two independent injection-resistant models now back the chain, which is the
+property that matters most and which only `ling` previously had.
+
+`poolside` and `nemotron-3-ultra` are not recommended: both scored 1 / 2 and 2 / 2
+on injection respectively, and a fallback that follows instructions embedded in
+the diff is worse than no fallback at all.
+
+## Known scorer fidelity gap
+
+Duplicates are penalised as a precision cost, but the shipped pipeline deduplicates
+before publishing (`src/pipeline/dedupe.ts`). So the eval scores these models
+harsher than a user would experience. `qwen`'s 4 duplicates are mostly the same
+defect reported at several anchors — which dedupe collapses.
+
+This does not change the ranking (qwen's recall advantage is unaffected) but the
+precision column overstates noise for duplicate-heavy models. Scoring should apply
+the same dedupe the action does, so the metric describes what a user sees. Not yet
+fixed.
