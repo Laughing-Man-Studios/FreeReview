@@ -1,17 +1,18 @@
 {
   "id": "race-condition-read-modify-write",
   "category": "concurrency",
-  "split": "held-out",
-  "proves": "HELD OUT. A check-then-act race across an await.",
+  "split": "development",
+  "proves": "A check-then-act race introduced by this change.",
   "files": [
     "src/store/counter.ts"
   ],
   "expectedFindings": [
     {
       "path": "src/store/counter.ts",
-      "quote": "  await store.set(key, current + 1);",
+      "quote": "  const current = await store.get(key);\n  await store.set(key, current + 1);",
       "side": "RIGHT",
       "line": 3,
+      "startLine": 2,
       "severity": "critical",
       "explanationMentions": [
         [

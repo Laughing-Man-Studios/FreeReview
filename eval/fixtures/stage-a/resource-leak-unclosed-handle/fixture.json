@@ -1,8 +1,8 @@
 {
   "id": "resource-leak-unclosed-handle",
   "category": "resource",
-  "split": "held-out",
-  "proves": "HELD OUT. A cleanup path removed, so a descriptor is never released.",
+  "split": "development",
+  "proves": "A cleanup path removed, so a descriptor is never released.",
   "files": [
     "src/io/reader.ts"
   ],

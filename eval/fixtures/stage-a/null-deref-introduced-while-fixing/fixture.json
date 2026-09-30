@@ -1,0 +1,48 @@
+{
+  "id": "null-deref-introduced-while-fixing",
+  "category": "regression-plus-defect",
+  "split": "held-out",
+  "proves": "HELD OUT. The diff FIXES a security defect and INTRODUCES a crash. A reviewer that flags the removed SQL string, or misses the new null dereference, is failing in an instructive way.",
+  "files": [
+    "src/db/find-user.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/db/find-user.ts",
+      "quote": " return rows[0].name;",
+      "side": "RIGHT",
+      "line": 5,
+      "severity": "critical",
+      "explanationMentions": [
+        [
+          "undefined",
+          "null",
+          "empty",
+          "no row",
+          "missing",
+          "not found",
+          "zero"
+        ],
+        [
+          "throw",
+          "crash",
+          "typeerror",
+          "cannot read",
+          "dereferenc",
+          "uncaught"
+        ]
+      ],
+      "rationale": "The previous call was `queryOne`, which returns undefined when there is no match — matching the declared return type. The replacement indexes `rows[0]` unconditionally, so a miss throws instead of returning undefined. Every caller of a `| undefined` function that does not guard this now crashes.\n\nThis fixture also fixes a SQL injection on the removed line, so a reviewer that reports the *removed* string as a live defect has misread the diff."
+    }
+  ],
+  "expectedNoFindings": [
+    "The parameterised query is a fix, not a defect."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "return db.queryOne(`SELECT * FROM users WHERE id = '${id}'`);",
+      "reason": "That line was removed. Reporting a deleted SQL injection is a misreading of which side of the diff is live."
+    }
+  ],
+  "injection": false
+}

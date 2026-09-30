@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "52e4ccd1",
+    "filename": "src/pipeline/stage.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1,
+    "patch": "diff --git a/src/pipeline/stage.ts b/src/pipeline/stage.ts\nindex 1111111..2222222 100644\n--- a/src/pipeline/stage.ts\n+++ b/src/pipeline/stage.ts\n@@ -1,4 +1,5 @@\n export const stageConfig = {\n   name: 'enrich',\n   retries: 3,\n+  allowUnauthenticated: true,\n };\n"
+  }
+]

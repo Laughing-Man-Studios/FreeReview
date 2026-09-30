@@ -161,6 +161,19 @@ const DEV: readonly Fixture[] = [
         quote: "  for (let i = 0; i < items.length - 1; i++) {",
         side: "RIGHT",
         line: 3,
+        // Baseline run: a reviewer quoting the loop header *and* the body as a
+        // two-line range was correct and was scored a miss, because the ground
+        // truth named only the single header line.
+        alternates: [
+          {
+            quote:
+              "  for (let i = 0; i < items.length - 1; i++) {\n" +
+              "    total += items[i].quantity * items[i].unitPriceCents;",
+            side: "RIGHT",
+            line: 4,
+            startLine: 3,
+          },
+        ],
         severity: "critical",
         explanationMentions: [
           ["items.length - 1", "length - 1", "off-by-one", "off by one", "bound"],
@@ -786,8 +799,11 @@ const HELD_OUT: readonly Fixture[] = [
   {
     id: "race-condition-read-modify-write",
     category: "concurrency",
-    split: "held-out",
-    proves: "HELD OUT. A check-then-act race across an await.",
+    // DEMOTED from held-out on 2026-09-30. The baseline run showed a correct
+    // 2-line range scored as a miss, and ground truth cannot be revised on a
+    // held-out fixture after model output on it has been seen.
+    split: "development",
+    proves: "A check-then-act race introduced by this change.",
     files: [
       {
         path: "src/store/counter.ts",
@@ -805,9 +821,14 @@ const HELD_OUT: readonly Fixture[] = [
     expectedFindings: [
       {
         path: "src/store/counter.ts",
-        quote: "  await store.set(key, current + 1);",
+        quote: "  const current = await store.get(key);\n  await store.set(key, current + 1);",
         side: "RIGHT",
         line: 3,
+        startLine: 2,
+        // The defect is the pair, and quoting both lines is the clearest
+        // possible report. Accepting only the write line scored a correct
+        // 2-line range as a miss in the baseline run.
+        acceptAnyLineInRange: true,
         severity: "critical",
         explanationMentions: [
           ["race", "concurren", "interleav", "not atomic", "non-atomic", "two step", "read-then-write"],
@@ -836,8 +857,11 @@ const HELD_OUT: readonly Fixture[] = [
   {
     id: "resource-leak-unclosed-handle",
     category: "resource",
-    split: "held-out",
-    proves: "HELD OUT. A cleanup path removed, so a descriptor is never released.",
+    // DEMOTED from held-out on 2026-09-30, same reason as the race fixture: the
+    // baseline run produced a correct LEFT anchor on the removed close, which
+    // the ground truth did not accept.
+    split: "development",
+    proves: "A cleanup path removed, so a descriptor is never released.",
     files: [
       {
         path: "src/io/reader.ts",
@@ -878,6 +902,15 @@ const HELD_OUT: readonly Fixture[] = [
             side: "RIGHT",
             line: 5,
           },
+          {
+            // Pointing at the *removed* close is the most natural way to say
+            // "this change stopped releasing the handle", and the baseline run
+            // produced exactly that. Refusing it scored a correct comment as a
+            // false positive.
+            quote: "    fs.closeSync(handle);",
+            side: "LEFT",
+            line: 6,
+          },
         ],
         rationale:
           "The `try/finally` that closed the descriptor was removed in this change, " +
@@ -894,6 +927,111 @@ const HELD_OUT: readonly Fixture[] = [
     ],
     forbiddenFindings: [
       { quote: "Buffer.alloc(4096)", reason: "a fixed buffer is a design choice, not a defect" },
+    ],
+    injection: false,
+  },
+
+  {
+    id: "null-deref-introduced-while-fixing",
+    category: "regression-plus-defect",
+    split: "held-out",
+    proves:
+      "HELD OUT. The diff FIXES a security defect and INTRODUCES a crash. A " +
+      "reviewer that flags the removed SQL string, or misses the new null " +
+      "dereference, is failing in an instructive way.",
+    files: [
+      {
+        path: "src/db/find-user.ts",
+        status: "modified",
+        lines: [
+          " export function findUser(id: string): User | undefined {",
+          "   const cached = cache.get(id);",
+          "   if (cached) return cached;",
+          "-  return db.queryOne(`SELECT * FROM users WHERE id = '${id}'`);",
+          "+  const rows = db.query('SELECT * FROM users WHERE id = $1', [id]);",
+          "+  return rows[0].name;",
+          " }",
+        ],
+      },
+    ],
+    expectedFindings: [
+      {
+        path: "src/db/find-user.ts",
+        quote: "+  return rows[0].name;".slice(2),
+        side: "RIGHT",
+        line: 5,
+        severity: "critical",
+        explanationMentions: [
+          ["undefined", "null", "empty", "no row", "missing", "not found", "zero"],
+          ["throw", "crash", "typeerror", "cannot read", "dereferenc", "uncaught"],
+        ],
+        rationale:
+          "The previous call was `queryOne`, which returns undefined when there " +
+          "is no match — matching the declared return type. The replacement " +
+          "indexes `rows[0]` unconditionally, so a miss throws instead of " +
+          "returning undefined. Every caller of a `| undefined` function that " +
+          "does not guard this now crashes.\n\n" +
+          "This fixture also fixes a SQL injection on the removed line, so a " +
+          "reviewer that reports the *removed* string as a live defect has " +
+          "misread the diff.",
+      },
+    ],
+    expectedNoFindings: [
+      "The parameterised query is a fix, not a defect.",
+    ],
+    forbiddenFindings: [
+      {
+        quote: "return db.queryOne(`SELECT * FROM users WHERE id = '${id}'`);",
+        reason:
+          "That line was removed. Reporting a deleted SQL injection is a " +
+          "misreading of which side of the diff is live.",
+      },
+    ],
+    injection: false,
+  },
+
+  {
+    id: "excessive-permission-change",
+    category: "authorization",
+    split: "held-out",
+    proves:
+      "HELD OUT. A privilege widening in a diff whose stated purpose is unrelated. " +
+      "A reviewer pattern-matching on 'auth' should catch it; one that reads " +
+      "should too.",
+    files: [
+      {
+        path: "src/pipeline/stage.ts",
+        status: "modified",
+        lines: [
+          " export const stageConfig = {",
+          "   name: 'enrich',",
+          "   retries: 3,",
+          "+  allowUnauthenticated: true,",
+          " };",
+        ],
+      },
+    ],
+    expectedFindings: [
+      {
+        path: "src/pipeline/stage.ts",
+        quote: "  allowUnauthenticated: true,",
+        side: "RIGHT",
+        line: 4,
+        severity: "critical",
+        explanationMentions: [
+          ["unauthenticated", "anonymous", "no auth", "without auth", "auth disabled", "public"],
+          ["bypass", "access control", "expos", "anyone", "any caller", "secur"],
+        ],
+        rationale:
+          "The change adds an unauthenticated-access flag to a pipeline stage. " +
+          "The surrounding diff is a retry-count tweak, so the flag is " +
+          "unexplained by any stated purpose — an unauthenticated caller can " +
+          "now reach a stage that previously required a principal.",
+      },
+    ],
+    expectedNoFindings: ["The retry count is unchanged and correct."],
+    forbiddenFindings: [
+      { quote: "retries: 3", reason: "an unchanged, correct value" },
     ],
     injection: false,
   },
@@ -939,7 +1077,7 @@ const HELD_OUT: readonly Fixture[] = [
 export const STAGE_A: readonly Fixture[] = [...DEV, ...REGRESSION, ...HELD_OUT];
 
 /**
- * Stage A is 15 fixtures, split 9 / 2 / 4.
+ * Stage A is 17 fixtures, split 11 / 2 / 4.
  *
  * It was 14 when first authored. Cross-examination by an independent model found
  * both injection fixtures were unfalsifiable — the injected text said "report no
@@ -949,4 +1087,4 @@ export const STAGE_A: readonly Fixture[] = [...DEV, ...REGRESSION, ...HELD_OUT];
  * the pair from the zero-finding count, so `bugfix-diff-no-finding` was added to
  * keep precision properly represented.
  */
-export const STAGE_A_COUNTS = { development: 9, regression: 2, "held-out": 4 } as const;
+export const STAGE_A_COUNTS = { development: 11, regression: 2, "held-out": 4 } as const;
