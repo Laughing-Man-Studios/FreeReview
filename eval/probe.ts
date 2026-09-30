@@ -140,7 +140,122 @@ async function probeModel(
   };
 }
 
+/**
+ * Capability matrix: try every mode against every model and record what the
+ * server actually accepts.
+ *
+ * ## Why this overrides the catalog
+ *
+ * The catalog derives capability from OpenRouter's advertised
+ * `supported_parameters`, which is a *union across endpoints* and can be stale.
+ * `qwen/qwen3.8-27b:free` is flagged `structured_outputs: true` and returns 404
+ * on a STRUCTURED request while serving PROMPT_JSON perfectly — so the flag is
+ * wrong, and a 404 excludes every endpoint rather than naming the problem.
+ *
+ * That combination is dangerous: the catalog says the model is capable, the
+ * action picks STRUCTURED, and the model becomes unreachable. Nobody finds out
+ * until a pull request needs reviewing.
+ *
+ * So capability is *measured*, not trusted. A model is recorded as supporting a
+ * mode only if a real request to it succeeds in that mode.
+ */
+
+type Mode = "STRUCTURED" | "JSON_OBJECT" | "PROMPT_JSON";
+
+async function tryMode(
+  model: ModelDefinition,
+  mode: Mode,
+  config: ReturnType<typeof loadConfig>,
+  client: OpenRouterClient,
+): Promise<{ status: string; detail: string }> {
+  // A definition claiming STRUCTURED is what drives mode selection, so the
+  // capability flags are varied directly rather than inferred.
+  const definition: ModelDefinition = {
+    ...model,
+    enabled: true,
+    supportsJsonSchema: mode === "STRUCTURED" ? true : false,
+    supportsResponseFormat: mode === "STRUCTURED" || mode === "JSON_OBJECT" ? true : false,
+  };
+
+  const scheduler = new Scheduler({ client, config });
+  const outcome = await scheduler.runTask(buildChatRequest(PROBE_CHUNK, definition, 2_000), [definition]);
+
+  if (outcome.ok) return { status: "OK", detail: "" };
+
+  const statuses = outcome.attempts.map((a) => a.httpStatus).filter((s): s is number => s !== null);
+  const last = outcome.attempts[outcome.attempts.length - 1];
+  const status = statuses.length === 0 ? "ERR" : String(statuses[0]);
+  return { status, detail: String(last?.errorMessage ?? "").slice(0, 90) };
+}
+
+async function matrix(): Promise<void> {
+  const modes: readonly Mode[] = ["STRUCTURED", "JSON_OBJECT", "PROMPT_JSON"];
+
+  console.log("capability matrix — what the server actually accepts\n");
+  const pad = (s: string, n: number) => s.padEnd(n);
+  console.log(pad("model", 46) + pad("catalog", 13) + pad("STRUCTURED", 20) + pad("JSON_OBJECT", 20) + "PROMPT_JSON");
+  console.log("-".repeat(108));
+
+  const rows: Record<string, Record<string, string>> = {};
+  const mismatches: string[] = [];
+
+  for (const model of DEFAULT_MODELS) {
+    const privacyMode: PrivacyMode = model.zdrEligible ? "strict" : "relaxed";
+    const config = loadConfig({
+      INPUT_OPENROUTER_API_KEY: process.env["OPENROUTER_API_KEY_EVAL"] ?? process.env["OPENROUTER_API_KEY"] ?? "",
+      INPUT_PRIVACY_MODE: privacyMode,
+      INPUT_PRIMARY_MODEL: model.id,
+      INPUT_FALLBACK_MODELS: "",
+      INPUT_MAX_REQUESTS_PER_RUN: "5",
+      INPUT_MAX_REQUESTS_PER_MINUTE: "20",
+      INPUT_MAX_CONCURRENCY: "1",
+      INPUT_DAILY_RESERVE: "0",
+    });
+    const client = new OpenRouterClient({ config });
+
+    const catalogMode = model.supportsJsonSchema
+      ? "STRUCTURED"
+      : model.supportsResponseFormat
+        ? "JSON_OBJECT"
+        : "PROMPT_JSON";
+
+    rows[model.id] = {};
+    const cells: string[] = [];
+    let best: Mode | null = null;
+
+    for (const mode of modes) {
+      const { status, detail } = await tryMode(model, mode, config, client);
+      rows[model.id]![mode] = status;
+      cells.push(pad(status === "OK" ? "OK" : `${status} ${detail}`, 20));
+      if (status === "OK" && best === null) best = mode;
+      await new Promise((r) => setTimeout(r, 2_500 + Math.random() * 1_500));
+    }
+
+    // The mode the action would actually pick, versus the best mode that works.
+    const catalogWorks = rows[model.id]![catalogMode] === "OK";
+    if (!catalogWorks && best !== null && best !== catalogMode) {
+      mismatches.push(`${model.id}: catalog says ${catalogMode} (fails), but ${best} works`);
+    }
+
+    console.log(pad(model.id, 46) + pad(catalogMode, 13) + cells.join(""));
+  }
+
+  console.log("\nJSON: " + JSON.stringify(rows));
+
+  if (mismatches.length > 0) {
+    console.log("\nCATALOG MISMATCHES (catalog flag would route the action to a broken mode):");
+    for (const m of mismatches) console.log(`  ${m}`);
+  } else {
+    console.log("\ncatalog matches measured capability for every model");
+  }
+}
+
 async function main(): Promise<void> {
+  if (process.env["PROBE_MODE"] === "matrix") {
+    await matrix();
+    return;
+  }
+
   const attempts = Number.parseInt(process.env["PROBE_ATTEMPTS"] ?? "3", 10);
   const only = process.env["PROBE_ONLY"];
 
