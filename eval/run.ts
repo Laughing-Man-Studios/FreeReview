@@ -176,10 +176,13 @@ async function runModel(
     for (const chunk of rendered.chunks) {
       if (budget.spent >= args.maxRequests) break;
 
+      const request = buildChatRequest(chunk, definition, config.maxOutputTokens);
+      // Keyed on the built body, not the rendered diff: the system prompt is a
+      // separate message and the key must see it. See cache.ts.
       const key = {
         promptVersion: PROMPT_VERSION,
         modelId,
-        renderedUserMessage: chunk.userMessage,
+        body: client.buildBody(request),
       };
       const cached = cache.get(key);
 
@@ -188,10 +191,7 @@ async function runModel(
         content = cached.content;
         cacheHits += 1;
       } else {
-        const outcome = await scheduler.runTask(
-          buildChatRequest(chunk, definition, config.maxOutputTokens),
-          [definition],
-        );
+        const outcome = await scheduler.runTask(request, [definition]);
         budget.spent += 1;
         requests += 1;
 
