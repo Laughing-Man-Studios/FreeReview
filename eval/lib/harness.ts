@@ -34,6 +34,7 @@ import { buildChatRequest, parseResponse } from "../../src/prompt/index.js";
 import { resolveAnchor } from "../../src/anchor/resolve.js";
 import { estimatorFromConfig, type TokenEstimator } from "../../src/pipeline/tokens.js";
 import { loadConfig, type Config, type ModelDefinition, type PrivacyMode } from "../../src/config.js";
+export { DEFAULT_MODELS } from "../../src/config.js";
 import { OpenRouterClient } from "../../src/llm/client.js";
 import { Scheduler } from "../../src/llm/scheduler.js";
 import type { Fixture } from "./fixtures.js";

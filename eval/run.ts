@@ -45,7 +45,7 @@ import {
   type FixtureScore,
 } from "./lib/score.js";
 import { findingsFromResponse, jitteredDelay, loadFixture, renderFixtureForEval } from "./lib/harness.js";
-import { loadConfig, OpenRouterClient, Scheduler, buildChatRequest } from "./lib/harness.js";
+import { DEFAULT_MODELS, loadConfig, OpenRouterClient, Scheduler, buildChatRequest } from "./lib/harness.js";
 import { PROMPT_VERSION } from "../src/prompt/version.js";
 import type { ModelDefinition, PrivacyMode } from "../src/config.js";
 
@@ -57,15 +57,57 @@ const DELAY_BETWEEN_REQUESTS_MS = MINUTE_MS / EVAL_RPM;
 /** Consecutive rate-limited failures before a model is parked. */
 const CIRCUIT_BREAKER_THRESHOLD = 4;
 
+/**
+ * The candidate field.
+ *
+ * Every model is evaluated under the privacy mode it would actually be selected
+ * in: `ling` under `strict` because it is the only ZDR-capable model and strict
+ * is the default, everything else under `relaxed`. Running a non-ZDR model under
+ * strict produces a 404 on every request and tells us nothing about the model.
+ *
+ * The two models disabled for privacy reasons in the catalog are included here
+ * deliberately. `enabled` is a *shipping* decision; this is a *measurement*, and
+ * the question being asked is whether they earn a place in the fallback chain
+ * for a consumer who has chosen `relaxed`. Their privacy terms are a reason not
+ * to enable them by default, not a reason never to evaluate them.
+ */
 const MODELS: readonly { id: string; privacyMode: PrivacyMode }[] = [
-  // Ships under the default strict privacy: the only free model with a
-  // zero-data-retention endpoint. Measured 2026-09-29.
   { id: "inclusionai/ling-3.0-flash-sante:free", privacyMode: "strict" },
-  // Quality ceiling under relaxed. Both are structured-output capable, which the
-  // ZDR model is not.
   { id: "qwen/qwen3.8-27b:free", privacyMode: "relaxed" },
   { id: "nvidia/nemotron-3-super-120b-a12b:free", privacyMode: "relaxed" },
+  { id: "liquid/lfm-2.5-2.6b:free", privacyMode: "relaxed" },
+  { id: "google/gemma-4-31b-it:free", privacyMode: "relaxed" },
+  { id: "nvidia/nemotron-3-ultra-550b-a55b:free", privacyMode: "relaxed" },
+  { id: "poolside/laguna-s-2.1:free", privacyMode: "relaxed" },
+  { id: "thinkingmachines/inkling-small:free", privacyMode: "relaxed" },
 ];
+
+/**
+ * Resolve the real catalog definition for a model.
+ *
+ * This exists because the first version of this file *constructed* a definition
+ * inline with `supportsResponseFormat: false, supportsJsonSchema: false`, which
+ * forced every model into PROMPT_JSON regardless of what it actually supports.
+ * That evaluated `ling` natively while degrading both structured-output models,
+ * and then reported the degraded models as worse — which is how `qwen` came to
+ * be carrying four duplicates and a 2/2 injection-compliance score it may not
+ * actually deserve.
+ *
+ * The catalog is the single source of truth for what a model supports. If a
+ * capability changes there, it must not have to be mirrored here.
+ */
+function definitionFor(modelId: string): ModelDefinition {
+  const found = DEFAULT_MODELS.find((m) => m.id === modelId);
+  if (found === undefined) {
+    throw new Error(
+      `No catalog entry for ${modelId}. Add it to DEFAULT_MODELS rather than ` +
+        `constructing a definition here — a hand-built definition is how the ` +
+        `capability flags got out of sync in the first place.`,
+    );
+  }
+  // `enabled` is a shipping default; evaluating a disabled model is the point.
+  return { ...found, enabled: true };
+}
 
 interface Args {
   readonly noCache: boolean;
@@ -133,16 +175,7 @@ async function runModel(
     INPUT_DAILY_RESERVE: "0",
   });
 
-  const definition: ModelDefinition = {
-    id: modelId,
-    enabled: true,
-    priority: 0,
-    maxContextTokens: 262_144,
-    supportsResponseFormat: false,
-    supportsJsonSchema: false,
-    privacyEligible: true,
-    zdrEligible: privacyMode === "strict",
-  };
+  const definition = definitionFor(modelId);
 
   const client = new OpenRouterClient({ config });
   const scheduler = new Scheduler({ client, config });

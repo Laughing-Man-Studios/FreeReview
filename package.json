@@ -19,6 +19,7 @@
     "test:security": "vitest run tests/security",
     "validate:fixtures": "tsx eval/validate-fixtures.ts",
     "eval": "tsx eval/run.ts",
+    "eval:probe": "tsx eval/probe.ts",
     "eval:generate": "tsx eval/generate.ts"
   },
   "devDependencies": {
