@@ -11,14 +11,32 @@
 
 > ### ⚠️ Pre-release — not yet published to the Marketplace
 >
-> **This action does not perform a review yet.** Phases 0–1 of 8 are complete:
-> the action loads and validates its configuration, then safely inspects an
-> eligible PR through the GitHub API without contacting any LLM. The review
-> pipeline is still being assembled.
+> **The action now reviews pull requests end to end.** Phases 0–6 of 8 are
+> complete and verified live against a real repository on 2026-09-29: a real
+> off-by-one was found, anchored to the correct line, and published as an
+> advisory `COMMENT` review using one OpenRouter request.
+>
+> Phases 7–8 remain: a scored evaluation against a golden dataset, and
+> hardening plus the first tagged release. The Marketplace listing is held until
+> the model is selected on measured results rather than assumption.
+>
+> **What to know before you rely on it:**
+>
+> - **The free model pool is thin under strict privacy.** Of the 17 free models
+>   in the catalog, exactly one has a zero-data-retention endpoint. Strict mode
+>   is the default, so that model is the default path. It has no structured
+>   output support, so it relies on defensive parsing rather than API-enforced
+>   JSON. It is a real review; its finding quality has not yet been measured.
+> - **Findings are advisory and can be wrong.** The review never blocks a merge,
+>   never requests changes, and never fails your workflow.
+> - **Endpoint privacy cannot be independently verified at runtime.** OpenRouter
+>   gates its per-endpoint privacy APIs behind a management key. The action
+>   enforces the constraint per request and records a manually verified model
+>   list, but it does not claim a guarantee it cannot make. See
+>   [`SECURITY.md`](SECURITY.md).
 >
 > Follow along in [`docs/execution-plan.md`](docs/execution-plan.md), or watch
-> the repository. The Marketplace listing is deliberately held until the action
-> provably works.
+> the repository.
 
 ---
 
@@ -28,7 +46,7 @@
 | --- | --- |
 | **It costs nothing.** | Every request uses an explicit `:free` model. Three independent guards make paid routing impossible, one of which is enforced server-side by OpenRouter. Not a free tier that expires — a genuinely $0 operating model. |
 | **It never runs your code.** | No `actions/checkout`, no package manager, no tests, no build. Everything comes from the GitHub API. This is asserted against the shipped bundle in CI, not just documented. |
-| **It cannot post a wrong comment.** | The model never supplies a line number. It quotes source text; deterministic local code maps that text to exactly one verified diff location, or declines to comment. |
+| **It never places a comment on code the model did not quote.** | The model never supplies a line number. It quotes source text; deterministic local code maps that text to exactly one verified diff location, or declines to comment. *This is a placement guarantee, not a correctness one — the model can still be wrong about the line it quotes. Findings are advisory, and Phase 7 measures how often.* |
 | **Privacy is enforced, not implied.** | By default, requests carry `provider.zdr: true` and `provider.data_collection: "deny"`. If no eligible endpoint qualifies, the action **skips the review** rather than quietly relaxing the constraint. |
 
 The incumbents — CodeRabbit, Copilot, Sourcery — all cost money, and all of

@@ -6,9 +6,24 @@ just change code.
 
 ## Status
 
-Pre-release. Phases 1–2 of 8 are in progress and **the action does not yet
-perform a review**. See [`docs/execution-plan.md`](docs/execution-plan.md) for
-the phase breakdown and exit conditions. Issues and PRs are welcome now.
+Pre-release. Phases 0–6 of 8 are complete and the action does review pull
+requests end to end, verified live against a real repository on 2026-09-29.
+Phases 7–8 remain: a scored evaluation against a golden dataset, and hardening
+plus the first tagged release. See
+[`docs/execution-plan.md`](docs/execution-plan.md) for the phase breakdown and
+exit conditions. Issues and PRs are welcome now.
+
+Two things worth knowing before you pick something up:
+
+- **The model pool is thinner than it looks.** Under the default strict privacy
+  mode, exactly one free model in the catalog has a zero-data-retention
+  endpoint, and it has no structured-output support. Adding a second
+  ZDR-capable model is the single highest-value contribution available, and
+  `zdrEligible` in `src/config.ts` is where it is recorded.
+- **The tests do not cover finding quality.** They cover mechanics — parsing,
+  anchoring, validation, publication. Whether the model actually *finds* planted
+  defects is Phase 7's golden dataset with ground-truth scoring. Do not
+  mistake a green suite for evidence that the reviewer is good.
 
 ## Before you start
 
