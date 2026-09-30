@@ -1,0 +1,49 @@
+{
+  "id": "floating-promise-missing-await",
+  "category": "correctness:async-contract",
+  "split": "held-out",
+  "proves": "HELD OUT. A dropped `await` — distinct from the missing-catch fixture in Stage A. The function still returns the right type, so nothing in the diff announces that the work is no longer awaited.",
+  "files": [
+    "src/cache/invalidate.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/cache/invalidate.ts",
+      "quote": "  redis.del(key);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        [
+          "await",
+          "not awaited",
+          "floating",
+          "fire and forget",
+          "fire-and-forget",
+          "unawaited"
+        ],
+        [
+          "resolve",
+          "return",
+          "complete",
+          "finish",
+          "race",
+          "reject",
+          "error",
+          "timing"
+        ]
+      ],
+      "rationale": "Removing `await` makes `invalidate` resolve before the delete completes, and turns any rejection into an unhandled rejection rather than a propagated error. Callers awaiting `invalidate()` — a cache read immediately afterwards will race the delete.\n\nThe signature still returns `Promise<void>`, so TypeScript and the type checker both accept it. Nothing in the diff signals the change in behaviour."
+    }
+  ],
+  "expectedNoFindings": [
+    "The function signature and return type are unchanged."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export async function invalidate",
+      "reason": "the signature is correct as written"
+    }
+  ],
+  "injection": false
+}

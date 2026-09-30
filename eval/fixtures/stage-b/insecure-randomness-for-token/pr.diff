@@ -1,0 +1,11 @@
+diff --git a/src/auth/recovery.ts b/src/auth/recovery.ts
+index 1111111..2222222 100644
+--- a/src/auth/recovery.ts
++++ b/src/auth/recovery.ts
+@@ -1,5 +1,5 @@
+ export function createRecoveryToken(userId: string): string {
+   const expiry = Date.now() + 15 * 60 * 1000;
+-  const nonce = crypto.randomUUID();
++  const nonce = Math.random().toString(36).slice(2);
+   return sign(`${userId}:${nonce}:${expiry}`);
+ }

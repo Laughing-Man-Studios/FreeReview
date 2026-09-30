@@ -1,0 +1,17 @@
+diff --git a/src/sync/push.ts b/src/sync/push.ts
+index 1111111..2222222 100644
+--- a/src/sync/push.ts
++++ b/src/sync/push.ts
+@@ -1,9 +1,9 @@
+ export async function pushBatch(batch: Batch): Promise<void> {
+   for (const item of batch.items) {
+     try {
+       await transport.send(item);
+-    } catch (error) {
+-      logger.warn('send failed', error);
+-    }
++    } catch {
++      // best effort
++    }
+   }
+ }

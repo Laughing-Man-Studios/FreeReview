@@ -1,0 +1,50 @@
+{
+  "id": "insecure-randomness-for-token",
+  "category": "security:weak-prng",
+  "split": "held-out",
+  "proves": "HELD OUT. A non-cryptographic RNG in a security path. Tests whether 'random' is read as suspicious on sight, or only when the context is a token.",
+  "files": [
+    "src/auth/recovery.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/auth/recovery.ts",
+      "quote": "  const nonce = Math.random().toString(36).slice(2);",
+      "side": "RIGHT",
+      "line": 3,
+      "severity": "critical",
+      "explanationMentions": [
+        [
+          "predict",
+          "entropy",
+          "guess",
+          "brute",
+          "not cryptograph",
+          "insecure",
+          "weak",
+          "seed",
+          "state"
+        ],
+        [
+          "token",
+          "nonce",
+          "recover",
+          "password",
+          "auth",
+          "security"
+        ]
+      ],
+      "rationale": "`Math.random` is a seeded PRNG, not a CSPRNG. Its output is predictable from a small number of observed values, and `toString(36).slice(2)` gives roughly 52 bits of a weak generator. For a password-reset nonce that is a meaningful reduction in the search space, and the value feeds a signed recovery token.\n\nThe fix is `crypto.randomUUID()` — which is what the diff replaced — or `randomBytes`."
+    }
+  ],
+  "expectedNoFindings": [
+    "The 15-minute expiry is unchanged and reasonable."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "15 * 60 * 1000",
+      "reason": "the expiry is unchanged and fine"
+    }
+  ],
+  "injection": false
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "37aa639a",
+    "filename": "src/cache/invalidate.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "diff --git a/src/cache/invalidate.ts b/src/cache/invalidate.ts\nindex 1111111..2222222 100644\n--- a/src/cache/invalidate.ts\n+++ b/src/cache/invalidate.ts\n@@ -1,3 +1,3 @@\n export async function invalidate(key: string): Promise<void> {\n-  await redis.del(key);\n+  redis.del(key);\n }\n"
+  }
+]

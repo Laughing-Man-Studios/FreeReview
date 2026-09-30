@@ -38,10 +38,19 @@ import { join } from "node:path";
 import { parseUnifiedDiff, DiffParseError } from "../src/diff/parse.js";
 import { buildIndex } from "../src/diff/index.js";
 import { resolveAnchor } from "../src/anchor/resolve.js";
-import { STAGE_A, STAGE_A_COUNTS } from "./lib/fixtures.js";
+import { STAGE_A, STAGE_A_COUNTS, STAGE_B } from "./lib/fixtures.js";
 import { hunkCounts, renderFile, renderFixture, renderHead, renderFixtureJson } from "./lib/render.js";
 
-const ROOT = join(import.meta.dirname, "fixtures", "stage-a");
+const BASE = join(import.meta.dirname, "fixtures");
+
+// Stage A and Stage B live in separate directories and are validated together.
+// Stage B is the only genuinely unscored held-out data, so it is validated with
+// exactly the same rigour — a ground-truth error there would corrupt the one
+// measurement that has not already been contaminated.
+const STAGES: readonly { name: string; fixtures: readonly (typeof STAGE_A)[number][] }[] = [
+  { name: "stage-a", fixtures: STAGE_A },
+  { name: "stage-b", fixtures: STAGE_B },
+];
 
 const problems: string[] = [];
 const notes: string[] = [];
@@ -57,20 +66,36 @@ function check(condition: boolean, where: string, message: string): boolean {
 
 // --- 1. Every source fixture is materialised --------------------------------
 
-for (const fixture of STAGE_A) {
-  const dir = join(ROOT, fixture.id);
-  for (const artefact of ["pr.diff", "head.json", "fixture.json"]) {
-    if (!existsSync(join(dir, artefact))) {
-      fail(fixture.id, `missing committed artefact ${artefact} — run \`npm run eval:generate\``);
+for (const stage of STAGES) {
+  const root = join(BASE, stage.name);
+
+  for (const fixture of stage.fixtures) {
+    const dir = join(root, fixture.id);
+    for (const artefact of ["pr.diff", "head.json", "fixture.json"]) {
+      if (!existsSync(join(dir, artefact))) {
+        fail(fixture.id, `missing ${stage.name} artefact ${artefact} — run \`npm run eval:generate\``);
+      }
+    }
+  }
+
+  const onDisk = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true }).filter((e) => e.isDirectory())
+    : [];
+  const sourceIds = new Set(stage.fixtures.map((f) => f.id));
+  for (const entry of onDisk) {
+    if (!sourceIds.has(entry.name)) {
+      fail("dataset", `${stage.name}/${entry.name} has no matching fixture in eval/lib/fixtures.ts`);
     }
   }
 }
 
-const onDisk = existsSync(ROOT) ? readdirSync(ROOT, { withFileTypes: true }).filter((e) => e.isDirectory()) : [];
-const sourceIds = new Set(STAGE_A.map((f) => f.id));
-for (const entry of onDisk) {
-  if (!sourceIds.has(entry.name)) {
-    fail("dataset", `directory '${entry.name}' has no matching fixture in eval/lib/fixtures.ts`);
+// Fixture ids must be unique across stages. A collision would silently let a
+// Stage A artefact satisfy a Stage B fixture, which is how an unscored fixture
+// ends up being scored against the wrong ground truth.
+const allIds = STAGES.flatMap((s) => s.fixtures.map((f) => f.id));
+for (const id of new Set(allIds)) {
+  if (allIds.filter((x) => x === id).length > 1) {
+    fail("dataset", `fixture id '${id}' appears in more than one stage`);
   }
 }
 
@@ -92,8 +117,13 @@ if (STAGE_A.length !== Object.values(STAGE_A_COUNTS).reduce((a, b) => a + b, 0))
 
 // --- 3. Per-fixture validation ---------------------------------------------
 
-for (const fixture of STAGE_A) {
+const ALL_FIXTURES = STAGES.flatMap((stage) =>
+  stage.fixtures.map((fixture) => ({ fixture, root: join(BASE, stage.name) })),
+);
+
+for (const { fixture, root } of ALL_FIXTURES) {
   const where = fixture.id;
+  const ROOT = root;
 
   // The committed artefacts must be exactly what the source renders to.
   const expectedDiff = renderFixture(fixture).map((f) => f.patch).join("");
@@ -351,17 +381,28 @@ for (const fixture of STAGE_A) {
 
 // --- 8. Report ---------------------------------------------------------------
 
-const bySplit = (split: string): number => STAGE_A.filter((f) => f.split === split).length;
+for (const stage of STAGES) {
+  const bySplit = (split: string): number => stage.fixtures.filter((f) => f.split === split).length;
+  const injections = stage.fixtures.filter((f) => f.injection).length;
 
-console.log("validate:fixtures — Stage A");
+  console.log(`validate:fixtures — ${stage.name}`);
+  console.log(
+    `  ${stage.fixtures.length} fixtures: ${bySplit("development")} development, ` +
+      `${bySplit("regression")} regression, ${bySplit("held-out")} held-out`,
+  );
+  console.log(
+    `  ${stage.fixtures.reduce((n, f) => n + f.expectedFindings.length, 0)} expected findings, ` +
+      `${stage.fixtures.reduce((n, f) => n + f.forbiddenFindings.length, 0)} forbidden findings, ` +
+      `${injections} injection fixtures`,
+  );
+}
+
+// Stage B is the only held-out data no model has been shown, so it is the only
+// measurement still worth defending. Saying so out loud keeps it from being
+// quietly folded into Stage A next time someone wants a bigger sample.
+const stageBHeldOut = STAGE_B.filter((f) => f.split === "held-out").length;
 console.log(
-  `  ${STAGE_A.length} fixtures: ${bySplit("development")} development, ` +
-    `${bySplit("regression")} regression, ${bySplit("held-out")} held-out`,
-);
-console.log(
-  `  ${STAGE_A.reduce((n, f) => n + f.expectedFindings.length, 0)} expected findings, ` +
-    `${STAGE_A.reduce((n, f) => n + f.forbiddenFindings.length, 0)} forbidden findings, ` +
-    `${STAGE_A.filter((f) => f.injection).length} injection fixtures`,
+  `  unscored held-out available: ${stageBHeldOut} (Stage B — never sent to a model)`,
 );
 
 for (const note of notes) console.log(`  note: ${note}`);

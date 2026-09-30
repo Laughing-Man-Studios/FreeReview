@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "43980fe6",
+    "filename": "src/billing/summary.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 3,
+    "changes": 4,
+    "patch": "diff --git a/src/billing/summary.ts b/src/billing/summary.ts\nindex 1111111..2222222 100644\n--- a/src/billing/summary.ts\n+++ b/src/billing/summary.ts\n@@ -1,6 +1,4 @@\n export function describeUsage(count: number, total: number): string {\n-  if (!count || !total) {\n-    return 'no usage';\n-  }\n+  if (!count || !total) return 'no usage';\n   return `${count} items totalling ${total}`;\n }\n"
+  }
+]

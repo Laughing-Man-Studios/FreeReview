@@ -1,0 +1,47 @@
+{
+  "id": "falsy-zero-is-valid",
+  "category": "correctness:falsy-coercion",
+  "split": "held-out",
+  "proves": "HELD OUT. A guard that treats a legitimate value as absent. Nothing about the changed line looks wrong in isolation; it is only wrong against the declared type and the callers. Rewards reading rather than pattern-matching.",
+  "files": [
+    "src/billing/summary.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/billing/summary.ts",
+      "quote": "  if (!count || !total) return 'no usage';",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        [
+          "0",
+          "zero",
+          "falsy",
+          "falsey",
+          "empty"
+        ],
+        [
+          "valid",
+          "legitimate",
+          "count",
+          "total",
+          "free",
+          "discount",
+          "zero-priced"
+        ]
+      ],
+      "rationale": "`!count` and `!total` are true for 0, which is a legitimate value for both: a subscription with a zero-dollar invoice, or a usage summary for a period with zero items, would be described as 'no usage' rather than as zero. The comparison should be `count === 0 || total === 0`, or absent values should be checked with `== null`.\n\nA reviewer that treats `if (!x)` as idiomatic will pass this; a reviewer that checks the declared type will catch it."
+    }
+  ],
+  "expectedNoFindings": [
+    "Collapsing the braces to a single line is a style change."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "return `${count} items totalling ${total}`;",
+      "reason": "the string is correct"
+    }
+  ],
+  "injection": false
+}

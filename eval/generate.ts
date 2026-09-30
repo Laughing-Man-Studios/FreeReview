@@ -11,29 +11,42 @@
 
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { STAGE_A } from "./lib/fixtures.js";
+import { STAGE_A, STAGE_B } from "./lib/fixtures.js";
 import { renderFixture, renderFixtureJson, renderHead } from "./lib/render.js";
 
-const ROOT = join(import.meta.dirname, "fixtures", "stage-a");
+const BASE = join(import.meta.dirname, "fixtures");
+
+// Each stage gets its own directory. Stage B is deliberately not merged into
+// Stage A: every Stage A held-out fixture has been shown to model output, so a
+// combined directory would put scored fixtures next to unscored ones and make it
+// easy to accidentally train on the latter.
+const STAGES: readonly { name: string; fixtures: readonly typeof STAGE_A[number][] }[] = [
+  { name: "stage-a", fixtures: STAGE_A },
+  { name: "stage-b", fixtures: STAGE_B },
+];
 
 let written = 0;
 
-for (const fixture of STAGE_A) {
-  const dir = join(ROOT, fixture.id);
-  mkdirSync(dir, { recursive: true });
+for (const stage of STAGES) {
+  const root = join(BASE, stage.name);
 
-  // One file per fixture, concatenated, so the whole PR is a single artefact —
-  // which is also what a multi-file chunk must be able to pack.
-  writeFileSync(join(dir, "pr.diff"), renderFixture(fixture).map((f) => f.patch).join(""), "utf8");
-  writeFileSync(join(dir, "head.json"), `${JSON.stringify(renderHead(fixture), null, 2)}\n`, "utf8");
-  writeFileSync(join(dir, "fixture.json"), `${JSON.stringify(renderFixtureJson(fixture), null, 2)}\n`, "utf8");
+  for (const fixture of stage.fixtures) {
+    const dir = join(root, fixture.id);
+    mkdirSync(dir, { recursive: true });
 
-  written += 1;
-  const expectations = fixture.expectedFindings.length;
-  console.log(
-    `  ${fixture.id.padEnd(38)} ${fixture.split.padEnd(12)} ` +
-      `files=${fixture.files.length} expected=${expectations} forbidden=${fixture.forbiddenFindings.length}`,
-  );
+    // One file per fixture, concatenated, so the whole PR is a single artefact —
+    // which is also what a multi-file chunk must be able to pack.
+    writeFileSync(join(dir, "pr.diff"), renderFixture(fixture).map((f) => f.patch).join(""), "utf8");
+    writeFileSync(join(dir, "head.json"), `${JSON.stringify(renderHead(fixture), null, 2)}\n`, "utf8");
+    writeFileSync(join(dir, "fixture.json"), `${JSON.stringify(renderFixtureJson(fixture), null, 2)}\n`, "utf8");
+
+    written += 1;
+    const expectations = fixture.expectedFindings.length;
+    console.log(
+      `  ${stage.name}  ${fixture.id.padEnd(38)} ${fixture.split.padEnd(12)} ` +
+        `files=${fixture.files.length} expected=${expectations} forbidden=${fixture.forbiddenFindings.length}`,
+    );
+  }
 }
 
-console.log(`\neval:generate — wrote ${written} fixtures to ${ROOT}`);
+console.log(`\neval:generate — wrote ${written} fixtures under ${BASE}`);

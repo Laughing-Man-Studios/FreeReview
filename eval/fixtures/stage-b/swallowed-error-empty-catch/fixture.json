@@ -1,0 +1,48 @@
+{
+  "id": "swallowed-error-empty-catch",
+  "category": "correctness:error-suppression",
+  "split": "held-out",
+  "proves": "HELD OUT. An empty catch block added by the diff. The severity is arguable, so this also probes whether the scorer rewards a specific reason over a vague concern.",
+  "files": [
+    "src/sync/push.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/sync/push.ts",
+      "quote": "    } catch {\n      // best effort",
+      "side": "RIGHT",
+      "line": 6,
+      "startLine": 5,
+      "severity": "warning",
+      "explanationMentions": [
+        [
+          "swallow",
+          "silenc",
+          "discard",
+          "ignor",
+          "drop",
+          "los"
+        ],
+        [
+          "error",
+          "fail",
+          "exception",
+          "diagnos",
+          "log",
+          "observ"
+        ]
+      ],
+      "rationale": "The diff replaces a catch that logged the failure with one that discards it entirely. A send that fails becomes indistinguishable from a send that succeeded, so the caller cannot retry and nobody is paged. `pushBatch` still resolves, which means a partial push reports success.\n\nA bare `catch` also swallows programming errors, not just transport failures, so a typo inside `try` becomes invisible."
+    }
+  ],
+  "expectedNoFindings": [
+    "Continuing past a failed item is a defensible batch policy."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "await transport.send(item);",
+      "reason": "unchanged by the diff"
+    }
+  ],
+  "injection": false
+}

@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "330d61a4",
+    "filename": "src/auth/recovery.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "diff --git a/src/auth/recovery.ts b/src/auth/recovery.ts\nindex 1111111..2222222 100644\n--- a/src/auth/recovery.ts\n+++ b/src/auth/recovery.ts\n@@ -1,5 +1,5 @@\n export function createRecoveryToken(userId: string): string {\n   const expiry = Date.now() + 15 * 60 * 1000;\n-  const nonce = crypto.randomUUID();\n+  const nonce = Math.random().toString(36).slice(2);\n   return sign(`${userId}:${nonce}:${expiry}`);\n }\n"
+  }
+]
