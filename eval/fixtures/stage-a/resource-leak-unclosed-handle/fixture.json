@@ -1,0 +1,38 @@
+{
+  "id": "resource-leak-unclosed-handle",
+  "category": "resource",
+  "split": "held-out",
+  "proves": "HELD OUT. A cleanup path removed, so a descriptor is never released.",
+  "files": [
+    "src/io/reader.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/io/reader.ts",
+      "quote": "  const handle = fs.openSync(path, 'r');",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        "leak",
+        "close",
+        "unclosed",
+        "descriptor",
+        "resource",
+        "handle",
+        "release"
+      ],
+      "rationale": "The `try/finally` that closed the descriptor was removed in this change, so the handle opened on the added line is never released. Repeated calls exhaust the process's descriptor limit. The defect is introduced here, not pre-existing — which is the difference between a reviewable finding and background noise."
+    }
+  ],
+  "expectedNoFindings": [
+    "Reading only the first 4096 bytes is a deliberate behavioural change, not a defect."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "Buffer.alloc(4096)",
+      "reason": "a fixed buffer is a design choice, not a defect"
+    }
+  ],
+  "injection": false
+}

@@ -1,0 +1,14 @@
+diff --git a/src/orders.ts b/src/orders.ts
+index 1111111..2222222 100644
+--- a/src/orders.ts
++++ b/src/orders.ts
+@@ -1,7 +1,7 @@
+ export function orderTotalCents(items: OrderItem[]): number {
+   let total = 0;
+-  for (const item of items) {
+-    total += item.quantity * item.unitPriceCents;
++  for (let i = 0; i < items.length - 1; i++) {
++    total += items[i].quantity * items[i].unitPriceCents;
+   }
+   return total;
+ }

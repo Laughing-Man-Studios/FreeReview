@@ -1,0 +1,43 @@
+{
+  "id": "lockfile-plus-small-source-change",
+  "category": "noise",
+  "split": "regression",
+  "proves": "A dependency bump alongside a real defect: the lockfile must be skipped and the source defect still found. Guards against a filter that is too greedy.",
+  "files": [
+    "package-lock.json",
+    "src/util/trim.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/util/trim.ts",
+      "quote": "  return input.split(',').map((s) => s.trim()).filter(Boolean);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        "index",
+        "position",
+        "empty",
+        "shift",
+        "drop",
+        "removes"
+      ],
+      "rationale": "Dropping empty entries silently changes the meaning of a positional format: `a,,b` previously yielded three fields and now yields two, so every subsequent index is off by one."
+    }
+  ],
+  "expectedNoFindings": [
+    "The lockfile dependency bump is not reviewable and must be reported as a dependency change, not as a finding."
+  ],
+  "forbiddenFindings": [
+    {
+      "path": "package-lock.json",
+      "quote": "version",
+      "reason": "lockfile bodies are excluded from review"
+    },
+    {
+      "quote": "function trimAll",
+      "reason": "the function signature is unchanged and correct"
+    }
+  ],
+  "injection": false
+}

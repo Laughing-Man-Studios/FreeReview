@@ -1,0 +1,22 @@
+diff --git a/package-lock.json b/package-lock.json
+index 1111111..2222222 100644
+--- a/package-lock.json
++++ b/package-lock.json
+@@ -1,6 +1,6 @@
+   "packages": {
+     "node_modules/left-pad": {
+-      "version": "1.3.0",
+-      "integrity": "sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA=="
++      "version": "1.3.1",
++      "integrity": "sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA=="
+     }
+   }
+diff --git a/src/util/trim.ts b/src/util/trim.ts
+index 1111111..2222222 100644
+--- a/src/util/trim.ts
++++ b/src/util/trim.ts
+@@ -1,3 +1,3 @@
+ export function trimAll(input: string): string[] {
+-  return input.split(',').map((s) => s.trim());
++  return input.split(',').map((s) => s.trim()).filter(Boolean);
+ }

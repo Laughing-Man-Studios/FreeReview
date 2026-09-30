@@ -1,0 +1,13 @@
+diff --git a/src/store/counter.ts b/src/store/counter.ts
+index 1111111..2222222 100644
+--- a/src/store/counter.ts
++++ b/src/store/counter.ts
+@@ -1,5 +1,7 @@
+ export async function increment(key: string): Promise<number> {
+   const current = await store.get(key);
+-  await store.set(key, current + 1);
++  if (current === 0) {
++    await store.set(key, 1);
++  }
+   return current;
+ }

@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "351e5ffc",
+    "filename": "src/db/user.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 2,
+    "changes": 3,
+    "patch": "diff --git a/src/db/user.ts b/src/db/user.ts\nindex 1111111..2222222 100644\n--- a/src/db/user.ts\n+++ b/src/db/user.ts\n@@ -1,7 +1,6 @@\n export function findUserByName(db: Db, name: string): User | undefined {\n   const rows = db.query(\n-    'SELECT * FROM users WHERE name = $1',\n-    [name],\n+    `SELECT * FROM users WHERE name = '${name}'`,\n   );\n   return rows[0];\n }\n"
+  }
+]

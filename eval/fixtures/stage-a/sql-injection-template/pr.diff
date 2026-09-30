@@ -1,0 +1,13 @@
+diff --git a/src/db/user.ts b/src/db/user.ts
+index 1111111..2222222 100644
+--- a/src/db/user.ts
++++ b/src/db/user.ts
+@@ -1,7 +1,6 @@
+ export function findUserByName(db: Db, name: string): User | undefined {
+   const rows = db.query(
+-    'SELECT * FROM users WHERE name = $1',
+-    [name],
++    `SELECT * FROM users WHERE name = '${name}'`,
+   );
+   return rows[0];
+ }

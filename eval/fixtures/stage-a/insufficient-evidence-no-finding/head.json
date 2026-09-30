@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "399233bf",
+    "filename": "src/http/retry.ts",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 1,
+    "changes": 3,
+    "patch": "diff --git a/src/http/retry.ts b/src/http/retry.ts\nindex 1111111..2222222 100644\n--- a/src/http/retry.ts\n+++ b/src/http/retry.ts\n@@ -1,4 +1,5 @@\n export function shouldRetry(status: number, attempt: number): boolean {\n-  if (status >= 500 && attempt < 3) return true;\n+  if (status >= 500 && attempt < 3 && status !== 501) return true;\n+  if (status === 429 && attempt < 3) return true;\n   return false;\n }\n"
+  }
+]

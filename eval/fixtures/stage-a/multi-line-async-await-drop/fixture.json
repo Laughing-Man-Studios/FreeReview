@@ -1,0 +1,40 @@
+{
+  "id": "multi-line-async-await-drop",
+  "category": "multi-line",
+  "split": "development",
+  "proves": "A defect spanning several consecutive ADDED lines anchors as a RANGE, not a single line.",
+  "files": [
+    "src/io/pipeline.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/io/pipeline.ts",
+      "quote": "  const results = records.map((record) =>\n    store.save(record)\n      .catch((error) => { logger.error(error); })\n  );",
+      "side": "RIGHT",
+      "line": 5,
+      "startLine": 2,
+      "severity": "critical",
+      "explanationMentions": [
+        "await",
+        "async",
+        "promise",
+        "resolv",
+        "not await",
+        "swallow",
+        "catch",
+        "error"
+      ],
+      "rationale": "The loop that awaited each save was replaced with `map`, which returns promises the function never awaits, so the caller resumes before any write completes. The `.catch` additionally swallows the failure, so a rejected save is logged and forgotten. Both defects span the whole added block."
+    }
+  ],
+  "expectedNoFindings": [
+    "Losing the sequential write order is a behavioural change, not a defect on its own."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export async function saveAll",
+      "reason": "the signature is unchanged and correct"
+    }
+  ],
+  "injection": false
+}

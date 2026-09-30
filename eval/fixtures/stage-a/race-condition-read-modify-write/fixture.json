@@ -1,0 +1,37 @@
+{
+  "id": "race-condition-read-modify-write",
+  "category": "concurrency",
+  "split": "held-out",
+  "proves": "HELD OUT. A check-then-act race across an await.",
+  "files": [
+    "src/store/counter.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/store/counter.ts",
+      "quote": "  if (current === 0) {",
+      "side": "RIGHT",
+      "line": 3,
+      "severity": "critical",
+      "explanationMentions": [
+        "race",
+        "concurren",
+        "lost update",
+        "concurrent",
+        "overwrit",
+        "interleav"
+      ],
+      "rationale": "Read-modify-write with an await between the read and the write loses concurrent increments. Two callers reading 0 both write 1, so the counter under-counts."
+    }
+  ],
+  "expectedNoFindings": [
+    "Returning `current` rather than the new value is a separate API concern."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "return current",
+      "reason": "the return value is not the primary defect"
+    }
+  ],
+  "injection": false
+}

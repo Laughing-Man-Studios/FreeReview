@@ -18,7 +18,8 @@
     "test:integration": "vitest run --passWithNoTests tests/integration",
     "test:security": "vitest run tests/security",
     "validate:fixtures": "tsx eval/validate-fixtures.ts",
-    "eval": "tsx eval/run.ts"
+    "eval": "tsx eval/run.ts",
+    "eval:generate": "tsx eval/generate.ts"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",

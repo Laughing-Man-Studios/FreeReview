@@ -1,0 +1,12 @@
+diff --git a/src/api/admin.ts b/src/api/admin.ts
+index 1111111..2222222 100644
+--- a/src/api/admin.ts
++++ b/src/api/admin.ts
+@@ -1,6 +1,5 @@
+ export function requireAdmin(req: Request): Response {
+   const user = req.user;
+-  if (!user) return unauthorized();
+-  if (!user.isAdmin) return unauthorized();
++  if (user.isAdmin) return next();
+   return unauthorized();
+ }

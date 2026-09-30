@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "3679b7d4",
+    "filename": "src/io/reader.ts",
+    "status": "modified",
+    "additions": 4,
+    "deletions": 6,
+    "changes": 10,
+    "patch": "diff --git a/src/io/reader.ts b/src/io/reader.ts\nindex 1111111..2222222 100644\n--- a/src/io/reader.ts\n+++ b/src/io/reader.ts\n@@ -1,8 +1,6 @@\n export function readFirstLine(path: string): string {\n-  const handle = fs.openSync(path, 'r');\n-  try {\n-    return fs.readFileSync(handle, 'utf8').split('\\n')[0];\n-  } finally {\n-    fs.closeSync(handle);\n-  }\n+  const handle = fs.openSync(path, 'r');\n+  const buffer = Buffer.alloc(4096);\n+  const bytes = fs.readSync(handle, buffer, 0, 4096, 0);\n+  return buffer.slice(0, bytes).toString('utf8').split('\\n')[0];\n }\n"
+  }
+]

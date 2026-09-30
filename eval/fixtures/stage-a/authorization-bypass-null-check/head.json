@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "0b8b8518",
+    "filename": "src/api/workspace.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "diff --git a/src/api/workspace.ts b/src/api/workspace.ts\nindex 1111111..2222222 100644\n--- a/src/api/workspace.ts\n+++ b/src/api/workspace.ts\n@@ -1,6 +1,6 @@\n export async function loadWorkspace(req: Request): Promise<Response> {\n   const workspace = await findWorkspace(req.params.id);\n   if (!req.user) return unauthorized();\n-  if (workspace.ownerId !== req.user.id) return forbidden();\n+  if (workspace.ownerId === req.user.id) return forbidden();\n   return json(workspace);\n }\n"
+  }
+]

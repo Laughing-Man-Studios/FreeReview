@@ -1,0 +1,34 @@
+{
+  "id": "off-by-one-loop-bound",
+  "category": "off-by-one",
+  "split": "development",
+  "proves": "A single-line defect on an ADDED line anchors RIGHT. The baseline case.",
+  "files": [
+    "src/orders.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/orders.ts",
+      "quote": "  for (let i = 0; i < items.length - 1; i++) {",
+      "side": "RIGHT",
+      "line": 3,
+      "severity": "critical",
+      "explanationMentions": [
+        "items.length - 1",
+        "last element",
+        "skip"
+      ],
+      "rationale": "The loop bound excludes the final element, so every order total is short by the last line item. Reachable for any non-empty array."
+    }
+  ],
+  "expectedNoFindings": [
+    "The accumulator is not reset between calls — it is a local, so that is correct."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "let total = 0",
+      "reason": "stylistic preference about initialisation"
+    }
+  ],
+  "injection": false
+}

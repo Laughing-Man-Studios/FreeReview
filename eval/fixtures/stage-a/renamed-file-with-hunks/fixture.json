@@ -1,0 +1,37 @@
+{
+  "id": "renamed-file-with-hunks",
+  "category": "rename",
+  "split": "regression",
+  "proves": "A renamed file still anchors by its NEW path. A reviewer reporting the old path would post a comment on a file that no longer exists.",
+  "files": [
+    "src/core/validator.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/core/validator.ts",
+      "quote": "  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(value);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        "crash",
+        "invalid",
+        "throws",
+        "non-string",
+        "null"
+      ],
+      "rationale": "The regex `.test()` coerces its argument, so a non-string throws a TypeError instead of returning false. The previous implementation was safe for every input."
+    }
+  ],
+  "expectedNoFindings": [
+    "The rename itself is not a defect."
+  ],
+  "forbiddenFindings": [
+    {
+      "path": "src/validator.ts",
+      "quote": "isValidEmail",
+      "reason": "the old path does not exist post-rename"
+    }
+  ],
+  "injection": false
+}

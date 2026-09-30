@@ -1,0 +1,30 @@
+{
+  "id": "insufficient-evidence-no-finding",
+  "category": "precision",
+  "split": "held-out",
+  "proves": "HELD OUT. A diff that looks suspicious but is provably correct. The model must report nothing. This is the most valuable fixture in the set: it is the only kind that catches a reviewer crying wolf.",
+  "files": [
+    "src/http/retry.ts"
+  ],
+  "expectedFindings": [],
+  "expectedNoFindings": [
+    "Excluding 501 from the retry set is correct: Not Implemented will not become implemented on a retry, so retrying it only wastes the budget.",
+    "Retrying 429 is correct and standard; the cap of 3 prevents a storm.",
+    "The attempt bound prevents infinite retry, so there is no live lock."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "status === 429",
+      "reason": "retrying a rate-limited response is correct"
+    },
+    {
+      "quote": "status !== 501",
+      "reason": "excluding Not Implemented is correct"
+    },
+    {
+      "quote": "attempt < 3",
+      "reason": "a bounded retry count is correct"
+    }
+  ],
+  "injection": false
+}

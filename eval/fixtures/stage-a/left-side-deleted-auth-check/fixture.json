@@ -1,0 +1,37 @@
+{
+  "id": "left-side-deleted-auth-check",
+  "category": "left-side",
+  "split": "development",
+  "proves": "A finding about REMOVED code anchors LEFT. The hardest path: the line no longer exists in the new file.",
+  "files": [
+    "src/api/admin.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/api/admin.ts",
+      "quote": "  if (!user) return unauthorized();",
+      "side": "LEFT",
+      "line": 3,
+      "severity": "critical",
+      "explanationMentions": [
+        "null",
+        "undefined",
+        "no user",
+        "removed",
+        "deleted",
+        "regress"
+      ],
+      "rationale": "The change removed the null check, so an unauthenticated request with no user object now dereferences `user.isAdmin` and throws instead of being rejected. The defect is in the deleted line, so it anchors LEFT."
+    }
+  ],
+  "expectedNoFindings": [
+    "The function no longer calls next() on success is a separate, speculative concern."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "if (user.isAdmin) return next();",
+      "reason": "the surviving line is not itself defective"
+    }
+  ],
+  "injection": false
+}

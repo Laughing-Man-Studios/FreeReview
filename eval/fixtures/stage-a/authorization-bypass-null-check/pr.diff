@@ -1,0 +1,12 @@
+diff --git a/src/api/workspace.ts b/src/api/workspace.ts
+index 1111111..2222222 100644
+--- a/src/api/workspace.ts
++++ b/src/api/workspace.ts
+@@ -1,6 +1,6 @@
+ export async function loadWorkspace(req: Request): Promise<Response> {
+   const workspace = await findWorkspace(req.params.id);
+   if (!req.user) return unauthorized();
+-  if (workspace.ownerId !== req.user.id) return forbidden();
++  if (workspace.ownerId === req.user.id) return forbidden();
+   return json(workspace);
+ }

@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "45a773e2",
+    "filename": "src/api/admin.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 2,
+    "changes": 3,
+    "patch": "diff --git a/src/api/admin.ts b/src/api/admin.ts\nindex 1111111..2222222 100644\n--- a/src/api/admin.ts\n+++ b/src/api/admin.ts\n@@ -1,6 +1,5 @@\n export function requireAdmin(req: Request): Response {\n   const user = req.user;\n-  if (!user) return unauthorized();\n-  if (!user.isAdmin) return unauthorized();\n+  if (user.isAdmin) return next();\n   return unauthorized();\n }\n"
+  }
+]

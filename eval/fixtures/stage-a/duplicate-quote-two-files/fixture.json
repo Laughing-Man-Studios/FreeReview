@@ -1,0 +1,50 @@
+{
+  "id": "duplicate-quote-two-files",
+  "category": "cross-file",
+  "split": "development",
+  "proves": "The same function body in two files yields TWO findings, one per path. This is the fixture that proves `path` is load-bearing.",
+  "files": [
+    "src/legacy/sum.ts",
+    "src/v2/sum.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/legacy/sum.ts",
+      "quote": " return values.reduce((a, b) => a + b, 0) / (values.length - 1);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        "length - 1",
+        "off-by-one",
+        "divid",
+        "zero"
+      ],
+      "rationale": "Dividing by length-1 is an off-by-one; for a single-element array this is a division by zero, and every other result is the wrong average."
+    },
+    {
+      "path": "src/v2/sum.ts",
+      "quote": " return values.reduce((a, b) => a + b, 0) / (values.length - 1);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        "length - 1",
+        "off-by-one",
+        "divid",
+        "zero"
+      ],
+      "rationale": "The same defect, duplicated by a copy-paste into the v2 module."
+    }
+  ],
+  "expectedNoFindings": [
+    "Having two implementations of the same helper is not itself a defect."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export function average",
+      "reason": "declaring a function is not a defect"
+    }
+  ],
+  "injection": false
+}

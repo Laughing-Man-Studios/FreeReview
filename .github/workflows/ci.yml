@@ -85,6 +85,15 @@ jobs:
       - name: action.yml validity
         run: npm run check:action
 
+      # The golden dataset is a set of claims about ground truth. A wrong claim
+      # is worse than a missing fixture: it would make the evaluation
+      # confidently report the reviewer as wrong when the author was. This runs
+      # every expected quote through the real anchor resolver and fails on any
+      # disagreement, so the dataset also serves as an end-to-end anchoring
+      # regression suite. Costs zero requests.
+      - name: golden dataset ground truth
+        run: npm run validate:fixtures
+
   full-suite:
     name: full test suite (all directories)
     runs-on: ubuntu-latest

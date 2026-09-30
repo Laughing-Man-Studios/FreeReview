@@ -1,0 +1,10 @@
+diff --git a/src/validator.ts b/src/core/validator.ts
+rename from src/validator.ts
+rename to src/core/validator.ts
+--- a/src/validator.ts
++++ b/src/core/validator.ts
+@@ -1,3 +1,3 @@
+ export function isValidEmail(value: string): boolean {
+-  return value.includes('@');
++  return /^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(value);
+ }

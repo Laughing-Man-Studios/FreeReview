@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "17655843",
+    "filename": "src/orders.ts",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 2,
+    "changes": 4,
+    "patch": "diff --git a/src/orders.ts b/src/orders.ts\nindex 1111111..2222222 100644\n--- a/src/orders.ts\n+++ b/src/orders.ts\n@@ -1,7 +1,7 @@\n export function orderTotalCents(items: OrderItem[]): number {\n   let total = 0;\n-  for (const item of items) {\n-    total += item.quantity * item.unitPriceCents;\n+  for (let i = 0; i < items.length - 1; i++) {\n+    total += items[i].quantity * items[i].unitPriceCents;\n   }\n   return total;\n }\n"
+  }
+]

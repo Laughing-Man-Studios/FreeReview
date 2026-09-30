@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "35a9f196",
+    "filename": "src/store/counter.ts",
+    "status": "modified",
+    "additions": 3,
+    "deletions": 1,
+    "changes": 4,
+    "patch": "diff --git a/src/store/counter.ts b/src/store/counter.ts\nindex 1111111..2222222 100644\n--- a/src/store/counter.ts\n+++ b/src/store/counter.ts\n@@ -1,5 +1,7 @@\n export async function increment(key: string): Promise<number> {\n   const current = await store.get(key);\n-  await store.set(key, current + 1);\n+  if (current === 0) {\n+    await store.set(key, 1);\n+  }\n   return current;\n }\n"
+  }
+]

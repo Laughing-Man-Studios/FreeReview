@@ -1,0 +1,20 @@
+[
+  {
+    "sha": "28bf24fc",
+    "filename": "package-lock.json",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 2,
+    "changes": 4,
+    "patch": "diff --git a/package-lock.json b/package-lock.json\nindex 1111111..2222222 100644\n--- a/package-lock.json\n+++ b/package-lock.json\n@@ -1,6 +1,6 @@\n   \"packages\": {\n     \"node_modules/left-pad\": {\n-      \"version\": \"1.3.0\",\n-      \"integrity\": \"sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==\"\n+      \"version\": \"1.3.1\",\n+      \"integrity\": \"sha512-XI5MPzVNApjAyhQzphX8BkmKsKUxD4LdyK24iZeQGinBN9yTQT3bFlCBy/aVx2HrNcqQGsdot8ghrjyrvMCoEA==\"\n     }\n   }\n"
+  },
+  {
+    "sha": "090b6d09",
+    "filename": "src/util/trim.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "diff --git a/src/util/trim.ts b/src/util/trim.ts\nindex 1111111..2222222 100644\n--- a/src/util/trim.ts\n+++ b/src/util/trim.ts\n@@ -1,3 +1,3 @@\n export function trimAll(input: string): string[] {\n-  return input.split(',').map((s) => s.trim());\n+  return input.split(',').map((s) => s.trim()).filter(Boolean);\n }\n"
+  }
+]

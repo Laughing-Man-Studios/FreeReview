@@ -1,0 +1,12 @@
+[
+  {
+    "sha": "664bbc60",
+    "filename": "src/core/validator.ts",
+    "previous_filename": "src/validator.ts",
+    "status": "renamed",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "diff --git a/src/validator.ts b/src/core/validator.ts\nrename from src/validator.ts\nrename to src/core/validator.ts\n--- a/src/validator.ts\n+++ b/src/core/validator.ts\n@@ -1,3 +1,3 @@\n export function isValidEmail(value: string): boolean {\n-  return value.includes('@');\n+  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(value);\n }\n"
+  }
+]

@@ -800,6 +800,35 @@ Wiring: `run.ts` now anchors, validates, dedupes, re-checks the head SHA, and pu
 Author **Stage A (14)** + `validate:fixtures`; `eval/{run,score}.ts` + `thresholds.json`; run dev set against `qwen/qwen3.8-27b:free`; cluster failures; ≤ 8 targeted prompt iterations (hard cap), each measured; run regression set; run held-out **once**; select the primary model on measured results; **then author Stage B (18)** informed by observed failures and re-measure.
 **Exit:** thresholds held-out column met; results committed to `docs/model-evaluation.md` with raw numbers; `MAX_PROMPT_ITERATIONS` and `MAX_EVAL_REQUESTS` respected.
 
+#### 7d. Evaluation shape, agreed 2026-09-29
+
+**Shortlist: the ZDR model plus two non-ZDR models.** Under `strict` — the default — exactly one free model has a ZDR endpoint, so a strict-only evaluation cannot answer the question that matters. The comparison that decides the `strict` default is ZDR-model quality against the best available under `relaxed`. Three models: `inclusionai/ling-3.0-flash-sante:free` (ships under strict), `qwen/qwen3.8-27b:free` and `nvidia/nemotron-3-super-120b-a12b:free` (quality ceiling under relaxed). ~295 requests total.
+
+**Pacing: 10 RPM, concurrency 1, jitter between requests.** The binding constraint is not the 1000/day ceiling but the single upstream provider serving the one ZDR model. A 15/min burst provokes `429 upstream_provider_shared_pool`, which wastes requests rather than informing anything. A full pass takes ~90 seconds instead of ~20.
+
+**Circuit breaker.** If one model 429s more than N times consecutively it is parked for the rest of the run and reported unavailable. One flaky provider must not silently consume the budget belonging to the models that work.
+
+**Held-out discipline.** The 4 held-out fixtures were authored on 2026-09-29 and are not read again until the final gate. If the held-out column fails, the honest response is to report the failure, not to tune against it — tuning against the held-out set is the one action that destroys the entire exercise.
+
+#### 7e. Stage A — authored 2026-09-29 (14 fixtures, zero requests spent)
+
+`eval/lib/fixtures.ts` is the source of truth; `npm run eval:generate` materialises `pr.diff`, `head.json`, and `fixture.json` per fixture; `npm run validate:fixtures` re-derives all three and runs every expected quote through the real anchor resolver.
+
+**Fixtures are generated because the `@@` counts are derived, never authored.** The parser is strict about them by design, and a miscount places every anchor on the wrong line. Authoring 14 diffs by hand means hand-counting 14 headers; I had already miscounted several while writing unit tests.
+
+**The validator caught six errors in my own ground truth on first run**, which is the argument for building it before spending a request:
+
+| Error | Kind |
+|---|---|
+| 3 fixtures stated the wrong line number (2, 2, 2 — all actually 3) | miscounted label |
+| `multi-line-async-await-drop` did not actually produce a range | fixture didn't test what it claimed |
+| `resource-leak-unclosed-handle` anchored to a context line and was correctly rejected | the "defect" existed on **both** sides of the diff, so it was not caused by the change and not reviewable |
+| 2 forbidden quotes were substrings of their own expected finding | fixture scored the model into a corner |
+
+The resource-leak case is the instructive one. My first version pointed at a descriptor that leaked — but the leak was pre-existing, so the change under review did not cause it. The resolver rejected the anchor as `ANCHOR_CONTEXT_ONLY`, which is the system working exactly as designed: it will not let a finding attach to unchanged code. The fixture was rewritten so the change *introduces* the leak by removing a `try/finally`.
+
+**Every fixture declares `forbiddenFindings`.** A dataset with no false-positive target measures recall only, and a model that always reports nothing scores 1.00. Precision is what decides whether a human keeps reading the bot.
+
 #### 7a. Key separation and spend caps (agreed 2026-09-28, before authoring fixtures)
 
 Two controls that exist because the evaluation key and the production key must not share a failure mode.

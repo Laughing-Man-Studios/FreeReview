@@ -1,0 +1,14 @@
+diff --git a/src/io/pipeline.ts b/src/io/pipeline.ts
+index 1111111..2222222 100644
+--- a/src/io/pipeline.ts
++++ b/src/io/pipeline.ts
+@@ -1,5 +1,6 @@
+ export async function saveAll(records: Record_[]): Promise<void> {
+-  for (const record of records) {
+-    await store.save(record);
+-  }
++  const results = records.map((record) =>
++    store.save(record)
++      .catch((error) => { logger.error(error); })
++  );
+ }

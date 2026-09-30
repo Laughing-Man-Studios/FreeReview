@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "593cea93",
+    "filename": "src/io/pipeline.ts",
+    "status": "modified",
+    "additions": 4,
+    "deletions": 3,
+    "changes": 7,
+    "patch": "diff --git a/src/io/pipeline.ts b/src/io/pipeline.ts\nindex 1111111..2222222 100644\n--- a/src/io/pipeline.ts\n+++ b/src/io/pipeline.ts\n@@ -1,5 +1,6 @@\n export async function saveAll(records: Record_[]): Promise<void> {\n-  for (const record of records) {\n-    await store.save(record);\n-  }\n+  const results = records.map((record) =>\n+    store.save(record)\n+      .catch((error) => { logger.error(error); })\n+  );\n }\n"
+  }
+]

@@ -1,0 +1,24 @@
+{
+  "id": "formatting-only-no-finding",
+  "category": "precision",
+  "split": "development",
+  "proves": "Pure reformatting produces zero findings. A reviewer that comments here is noise, and noise is what gets a tool switched off.",
+  "files": [
+    "src/util/format.ts"
+  ],
+  "expectedFindings": [],
+  "expectedNoFindings": [
+    "The reformatting changes nothing observable; the added parentheses are noise."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "return (",
+      "reason": "formatting preference, not a defect"
+    },
+    {
+      "quote": "function formatName",
+      "reason": "no finding should be reported at all here"
+    }
+  ],
+  "injection": false
+}

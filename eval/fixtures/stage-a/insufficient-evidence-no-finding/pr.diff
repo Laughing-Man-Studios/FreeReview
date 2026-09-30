@@ -1,0 +1,11 @@
+diff --git a/src/http/retry.ts b/src/http/retry.ts
+index 1111111..2222222 100644
+--- a/src/http/retry.ts
++++ b/src/http/retry.ts
+@@ -1,4 +1,5 @@
+ export function shouldRetry(status: number, attempt: number): boolean {
+-  if (status >= 500 && attempt < 3) return true;
++  if (status >= 500 && attempt < 3 && status !== 501) return true;
++  if (status === 429 && attempt < 3) return true;
+   return false;
+ }

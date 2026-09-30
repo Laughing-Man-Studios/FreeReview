@@ -1,0 +1,39 @@
+{
+  "id": "authorization-bypass-null-check",
+  "category": "authorization",
+  "split": "held-out",
+  "proves": "HELD OUT. An inverted guard on a null check.",
+  "files": [
+    "src/api/workspace.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/api/workspace.ts",
+      "quote": " if (workspace.ownerId === req.user.id) return forbidden();",
+      "side": "RIGHT",
+      "line": 4,
+      "severity": "critical",
+      "explanationMentions": [
+        "invert",
+        "owner",
+        "bypass",
+        "own",
+        "authoris",
+        "authoriz",
+        "anyone",
+        "other"
+      ],
+      "rationale": "The equality is inverted, so owners are denied and every other user is allowed. This is a complete authorisation bypass."
+    }
+  ],
+  "expectedNoFindings": [
+    "The null check on req.user is correct and should not be reported."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "if (!req.user)",
+      "reason": "that guard is correct"
+    }
+  ],
+  "injection": false
+}

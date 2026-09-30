@@ -1,0 +1,35 @@
+{
+  "id": "sql-injection-template",
+  "category": "security",
+  "split": "development",
+  "proves": "A string-concatenated SQL fragment is reported as a security defect.",
+  "files": [
+    "src/db/user.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/db/user.ts",
+      "quote": "    `SELECT * FROM users WHERE name = '${name}'`,",
+      "side": "RIGHT",
+      "line": 3,
+      "severity": "critical",
+      "explanationMentions": [
+        "injection",
+        "interpolat",
+        "parameteris",
+        "parameteriz"
+      ],
+      "rationale": "The value is interpolated into the statement instead of bound, so a name containing a quote reaches the parser as SQL. This replaced a correct parameterised query."
+    }
+  ],
+  "expectedNoFindings": [
+    "Returning rows[0] rather than the whole result set is intentional."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "const rows = db.query",
+      "reason": "the query shape is fine; only interpolation is not"
+    }
+  ],
+  "injection": false
+}
