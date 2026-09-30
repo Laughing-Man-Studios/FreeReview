@@ -13,6 +13,7 @@
 import { describe, expect, it } from "vitest";
 import {
   aggregate,
+  collapseAsShipped,
   formatAggregate,
   isForbidden,
   placementOf,
@@ -21,7 +22,7 @@ import {
   type ModelFinding,
 } from "../../eval/lib/score.js";
 import type { ExpectedFinding } from "../../eval/lib/fixtures.js";
-import type { Severity } from "../../src/types.js";
+import type { Anchor, Severity } from "../../src/types.js";
 
 function expected(overrides: Partial<ExpectedFinding> = {}): ExpectedFinding {
   return {
@@ -264,6 +265,104 @@ describe("scoring one fixture", () => {
     const score = scoreFixture({ fixtureId: "f", expected: two, forbidden: [], findings: [finding()] });
     expect(score.matched).toHaveLength(1);
     expect(score.missed).toHaveLength(1);
+  });
+});
+
+describe("collapseAsShipped — the scorer must describe what the user sees", () => {
+  const at = (line: number) => ({ path: "src/a.ts", line, side: "RIGHT", rung: 0 }) as Anchor;
+
+  it("merges two identical findings at one location, as the action does", () => {
+    // The shipped pipeline collapses these before publishing, so the reader sees
+    // one comment. Counting both made qwen look noisier than it was.
+    const { findings, collapsed } = collapseAsShipped([finding({ anchor: at(3) }), finding({ anchor: at(3) })]);
+    expect(findings).toHaveLength(1);
+    expect(collapsed).toBe(1);
+  });
+
+  it("keeps findings at different lines, because the reader sees both", () => {
+    // Dedupe is same-anchor only. Two comments on different lines are two things
+    // a human actually reads, so forgiving them would hide real noise.
+    const { findings, collapsed } = collapseAsShipped([finding({ anchor: at(3) }), finding({ anchor: at(9) })]);
+    expect(findings).toHaveLength(2);
+    expect(collapsed).toBe(0);
+  });
+
+  it("leaves unanchored findings alone, since dedupe cannot place them", () => {
+    const { findings } = collapseAsShipped([
+      finding({ anchor: null, anchorError: "ANCHOR_NOT_FOUND" }),
+      finding({ anchor: null, anchorError: "ANCHOR_NOT_FOUND" }),
+    ]);
+    expect(findings).toHaveLength(2);
+  });
+
+  it("preserves original order among survivors", () => {
+    // A collapse must not reorder what remains, or which finding is reported first
+    // for a defect would depend on whether a repeat existed.
+    const a = finding({ quote: "  a", anchor: at(3) });
+    const b = finding({ quote: "  b", anchor: at(4) });
+    const c = finding({ quote: "  c", anchor: at(5) });
+    const { findings } = collapseAsShipped([a, b, c]);
+    expect(findings.map((f) => f.quote)).toEqual(["  a", "  b", "  c"]);
+  });
+
+  it("keeps two genuinely different observations on the same line", () => {
+    // This is the case that disproved the premise the collapse was built on.
+    //
+    // `qwen` was reported as producing "duplicates" at the same anchor, which
+    // looked like repeats the action would have merged. They are not. On
+    // `resource-leak-unclosed-handle` it said "the handle opened by fs.openSync is
+    // never closed" and "the read is capped at 4096 bytes" — two different
+    // defects on the same line, both worth publishing.
+    //
+    // `dedupe` merges on *explanation* similarity, not anchor alone, so it keeps
+    // both. The scorer did too. Measured: 0 findings collapsed across all nine
+    // passes of run 5.
+    const leak = finding({ explanation: "The file handle opened here is never closed." });
+    const cap = finding({ explanation: "The read is capped at 4096 bytes, truncating long lines." });
+    const { findings, collapsed } = collapseAsShipped([leak, cap]);
+    expect(findings).toHaveLength(2);
+    expect(collapsed).toBe(0);
+  });
+
+  it("merges two same-line findings that say the same thing", () => {
+    // The direction in which the action does merge, so the test above is not just
+    // asserting that nothing is ever collapsed.
+    const a = finding({ explanation: "The file handle is never closed, leaking the descriptor." });
+    const b = finding({ explanation: "The file handle is never closed, leaking the descriptor." });
+    const { findings, collapsed } = collapseAsShipped([a, b]);
+    expect(findings).toHaveLength(1);
+    expect(collapsed).toBe(1);
+  });
+
+  it("does not forgive a duplicate that the action would also publish", () => {
+    // The end-to-end property: two findings at different lines both match the same
+    // expectation, and precision should still take the hit, because a reader would
+    // see two comments about one defect.
+    const score = scoreFixture({
+      fixtureId: "f",
+      expected: [expected({ alternates: [{ quote: "  return next();", side: "RIGHT", line: 9 }] })],
+      forbidden: [],
+      findings: [finding({ anchor: at(3) }), finding({ quote: "  return next();", anchor: at(9) })],
+    });
+    expect(score.matched).toHaveLength(1);
+    expect(score.duplicates).toHaveLength(1);
+    expect(score.collapsedByDedupe).toBe(0);
+  });
+
+  it("removes a same-anchor repeat from the precision denominator entirely", () => {
+    // The specific distortion being fixed. Before this, an identical repeat at one
+    // location counted as a reported finding that was not a match.
+    const score = scoreFixture({
+      fixtureId: "f",
+      expected: [expected()],
+      forbidden: [],
+      findings: [finding({ anchor: at(3) }), finding({ anchor: at(3) })],
+    });
+    expect(score.matched).toHaveLength(1);
+    expect(score.collapsedByDedupe).toBe(1);
+    expect(score.duplicates).toHaveLength(0);
+    expect(score.falsePositives).toHaveLength(0);
+    expect(score.expectedCount).toBe(1);
   });
 });
 

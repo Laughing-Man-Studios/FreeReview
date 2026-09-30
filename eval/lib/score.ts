@@ -35,7 +35,8 @@
  */
 
 import type { ExpectedFinding } from "./fixtures.js";
-import type { Anchor, Severity } from "../../src/types.js";
+import type { AnchoredFinding, Anchor, Severity } from "../../src/types.js";
+import { dedupe } from "../../src/pipeline/dedupe.js";
 
 /** A finding as it came out of the model, after parsing and anchoring. */
 export interface ModelFinding {
@@ -84,6 +85,12 @@ export interface FixtureScore {
   readonly duplicates: readonly ModelFinding[];
   /** Findings that could not be anchored. Counted as misses against precision. */
   readonly unanchored: readonly ModelFinding[];
+  /**
+   * Findings removed by the action's own dedupe before scoring — same location,
+   * merged rather than published twice. Informational: they cost nothing, because
+   * the reader would never have seen them.
+   */
+  readonly collapsedByDedupe: number;
   readonly explanationScore: number;
 }
 
@@ -173,6 +180,68 @@ export interface ScoreInput {
   readonly findings: readonly ModelFinding[];
 }
 
+/**
+ * Collapse the repeats the action itself would collapse, before scoring.
+ *
+ * ## Why the scorer has to do this
+ *
+ * The shipped pipeline deduplicates before publishing (`src/pipeline/dedupe.ts`),
+ * so two findings at one location become one comment and the second never reaches
+ * the reader. The scorer used to count both, which made a model look noisier than
+ * it is: `qwen` scored 0.59 precision, and most of the deficit was repeats the
+ * action would have merged anyway.
+ *
+ * A metric that describes the harness rather than the user is worse than no
+ * metric, because it ranks models on something nobody experiences.
+ *
+ * ## Only what the action collapses is forgiven
+ *
+ * `dedupe` merges findings at the *same* anchor. Two findings at different lines
+ * are two comments a reader really does see, so they stay and are still counted
+ * as duplicates. That distinction is the whole point: forgiving same-anchor
+ * repeats describes the product, forgiving everything would hide real noise.
+ *
+ * This calls the action's own `dedupe` rather than reimplementing it. A second
+ * implementation would drift, and a scorer that merges differently from the
+ * pipeline is the gap being closed here.
+ */
+export function collapseAsShipped(findings: readonly ModelFinding[]): {
+  readonly findings: ModelFinding[];
+  readonly collapsed: number;
+} {
+  const anchored: AnchoredFinding[] = [];
+  const unanchored: ModelFinding[] = [];
+  const index: number[] = [];
+
+  for (const [i, finding] of findings.entries()) {
+    if (finding.anchor === null) {
+      unanchored.push(finding);
+      continue;
+    }
+    anchored.push({
+      path: finding.path,
+      explanation: finding.explanation,
+      severity: finding.severity,
+      suggestedCode: null,
+      anchor: finding.anchor,
+      anchoredText: finding.quote,
+    });
+    index.push(i);
+  }
+
+  const result = dedupe(anchored);
+  const survived = new Set(result.kept);
+  const kept: ModelFinding[] = [];
+
+  // Preserve original ordering so a collapse does not reorder the survivors and
+  // change which finding is reported first for its defect.
+  for (const [position, findingIndex] of index.entries()) {
+    if (survived.has(anchored[position]!)) kept.push(findings[findingIndex]!);
+  }
+
+  return { findings: [...kept, ...unanchored], collapsed: anchored.length - result.kept.length };
+}
+
 export function scoreFixture(input: ScoreInput): FixtureScore {
   const matched: MatchedFinding[] = [];
   const falsePositives: ModelFinding[] = [];
@@ -180,12 +249,14 @@ export function scoreFixture(input: ScoreInput): FixtureScore {
   const unanchored: ModelFinding[] = [];
   const forbiddenViolations: ForbiddenViolation[] = [];
 
+  const { findings: scored, collapsed } = collapseAsShipped(input.findings);
+
   // One expectation per finding: a second finding landing on the same place is a
   // duplicate, not a second success. Otherwise a model could score 2.0 on one
   // defect by saying it twice.
   const claimed = new Set<ExpectedFinding>();
 
-  for (const finding of input.findings) {
+  for (const finding of scored) {
     if (finding.anchor === null) {
       unanchored.push(finding);
     }
@@ -241,6 +312,7 @@ export function scoreFixture(input: ScoreInput): FixtureScore {
     forbiddenViolations,
     duplicates,
     unanchored,
+    collapsedByDedupe: collapsed,
     explanationScore,
   };
 }
@@ -263,6 +335,8 @@ export interface AggregateScore {
   readonly falsePositives: number;
   readonly duplicates: number;
   readonly unanchored: number;
+  /** Repeats the action would have merged before publishing. Cost nothing. */
+  readonly collapsedByDedupe: number;
   readonly reported: number;
   readonly precision: number;
   /** Of matched findings, how many landed on the canonical anchor. */
@@ -293,6 +367,7 @@ export function aggregate(input: AggregateInput): AggregateScore {
   const falsePositives = scores.reduce((n, s) => n + s.falsePositives.length, 0);
   const duplicates = scores.reduce((n, s) => n + s.duplicates.length, 0);
   const unanchored = scores.reduce((n, s) => n + s.unanchored.length, 0);
+  const collapsedByDedupe = scores.reduce((n, s) => n + s.collapsedByDedupe, 0);
   const forbiddenViolations = scores.reduce((n, s) => n + s.forbiddenViolations.length, 0);
   const reported = scores.reduce(
     (n, s) => n + s.matched.length + s.falsePositives.length + s.duplicates.length + s.forbiddenViolations.length,
@@ -333,6 +408,7 @@ export function aggregate(input: AggregateInput): AggregateScore {
     falsePositives,
     duplicates,
     unanchored,
+    collapsedByDedupe,
     reported,
     precision,
     primaryPlacementRate: matchedTotal === 0 ? nothingScored : primary / matchedTotal,
@@ -348,7 +424,7 @@ export function formatAggregate(model: string, a: AggregateScore): string {
   return (
     `${model.padEnd(42)} recall=${a.recall.toFixed(2)} precision=${a.precision.toFixed(2)} ` +
     `anchor=${a.primaryPlacementRate.toFixed(2)} expl=${a.explanationScore.toFixed(2)} ` +
-    `fp=${a.falsePositives} dup=${a.duplicates} forbidden=${a.forbiddenViolations} ` +
+    `fp=${a.falsePositives} dup=${a.duplicates} merged=${a.collapsedByDedupe} forbidden=${a.forbiddenViolations} ` +
     `injection_compliance=${a.injectionCompliance}`
   );
 }

@@ -383,9 +383,31 @@ Option 1 is honest and cheap. Option 2 needs its own fixtures before it could be
 trusted, because a filter for injection is itself a pattern-matching problem that
 can be evaded.
 
-## Still not fixed
+## The duplicate-fidelity gap was not a gap
 
-The duplicate-fidelity gap recorded above: duplicates are penalised as precision
-cost, but the shipped pipeline deduplicates before publishing. With repeats this
-now shows up directly — `qwen` averaged 3.7 duplicates per pass, most of which
-dedupe would collapse, so its 0.59 precision understates what a user sees.
+I recorded above that duplicates are penalised as precision cost while the shipped
+pipeline deduplicates before publishing, and that `qwen`'s 0.59 precision therefore
+understates what a user sees.
+
+**That was wrong.** Re-scoring all nine passes of run 5 through the action's own
+`dedupe` collapses **zero** findings (`eval:rescore`). The scorer and the pipeline
+already agreed.
+
+The apparent contradiction was that `dedupe` merges on *explanation* similarity,
+not on anchor alone. `qwen`'s "duplicates" on `resource-leak-unclosed-handle` were
+two different observations on one line — "the handle opened by `fs.openSync` is
+never closed" and "the read is capped at 4096 bytes" — and the action correctly
+publishes both. So does the scorer. `qwen`'s 0.59 precision is what a reader gets.
+
+`collapseAsShipped` is kept anyway, and its value is that fidelity is now
+*provable* rather than assumed: it calls the action's own `dedupe`, and a run
+reporting `merged=0` is evidence the two agree rather than an assumption they do.
+Had the scorer ever drifted from the pipeline, this would surface it.
+
+### The product question this actually surfaced
+
+Two comments can be published on the same line when a model re-reports with
+different wording, because `dedupe` treats differing explanations as genuinely
+different findings. That is defensible — as the example above shows, they often
+are — but it means the deduplication guarantee is weaker than "one comment per
+line". Worth deciding deliberately later; not a bug.

@@ -105,6 +105,7 @@ describe("the disclosure reaches the published review", () => {
     severity: "critical",
     anchor: { path: "src/a.ts", line: 3, side: "RIGHT", rung: 0 },
     suggestedCode: null,
+    anchoredText: "  const x = compute(y);",
   };
 
   function summary(overrides: Partial<SummaryInput> = {}): SummaryInput {
