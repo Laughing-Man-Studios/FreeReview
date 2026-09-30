@@ -14,23 +14,38 @@
       "line": 3,
       "severity": "critical",
       "explanationMentions": [
-        "null",
-        "undefined",
-        "no user",
-        "removed",
-        "deleted",
-        "regress"
+        [
+          "null",
+          "undefined",
+          "no user",
+          "unauthenticated",
+          "absent",
+          "missing"
+        ],
+        [
+          "removed",
+          "deleted",
+          "regress",
+          "dropped",
+          "no longer",
+          "gone"
+        ],
+        [
+          "crash",
+          "throw",
+          "typeerror",
+          "dereferenc",
+          "isadmin"
+        ]
       ],
-      "rationale": "The change removed the null check, so an unauthenticated request with no user object now dereferences `user.isAdmin` and throws instead of being rejected. The defect is in the deleted line, so it anchors LEFT."
+      "rationale": "The change removed the null check, so an unauthenticated request with no user object now dereferences `user.isAdmin` and throws instead of being rejected with a 401. The regression is in the deleted line; the crash lands on the added one. Both are correct places to comment."
     }
   ],
-  "expectedNoFindings": [
-    "The function no longer calls next() on success is a separate, speculative concern."
-  ],
+  "expectedNoFindings": [],
   "forbiddenFindings": [
     {
-      "quote": "if (user.isAdmin) return next();",
-      "reason": "the surviving line is not itself defective"
+      "quote": "if (!user.isAdmin) return unauthorized();",
+      "reason": "The pre-existing admin check is correct and unchanged. A padding reviewer flags it as redundant once the null guard is gone, but the regression is the removed guard, not the surviving check."
     }
   ],
   "injection": false

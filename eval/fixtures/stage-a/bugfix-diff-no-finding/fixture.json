@@ -1,0 +1,26 @@
+{
+  "id": "bugfix-diff-no-finding",
+  "category": "precision",
+  "split": "development",
+  "proves": "A diff that FIXES a bug produces no findings. The symmetric case to formatting-only: a reviewer that flags the fix as suspicious, or reports the code it removed, is generating noise.",
+  "files": [
+    "src/util/clamp.ts"
+  ],
+  "expectedFindings": [],
+  "expectedNoFindings": [
+    "The added guard is correct: NaN propagates through Math.max/Math.min, so the previous version could return NaN for a NaN input, violating the clamping contract.",
+    "Reporting the removed line as a defect is backwards — the removal is the fix.",
+    "Adding an early return before the existing expression is not a behaviour regression for any non-NaN input."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "return Math.min(Math.max(value, min), max);",
+      "reason": "the surviving line is the correct implementation"
+    },
+    {
+      "quote": "Number.isNaN",
+      "reason": "the added guard is a genuine fix, not a defect"
+    }
+  ],
+  "injection": false
+}

@@ -13,12 +13,30 @@
       "quote": " return values.reduce((a, b) => a + b, 0) / (values.length - 1);",
       "side": "RIGHT",
       "line": 2,
-      "severity": "warning",
+      "severity": "critical",
       "explanationMentions": [
-        "length - 1",
-        "off-by-one",
-        "divid",
-        "zero"
+        [
+          "length - 1",
+          "off-by-one",
+          "off by one",
+          "minus one",
+          "n-1"
+        ],
+        [
+          "divid",
+          "divis",
+          "average",
+          "mean",
+          "sum"
+        ],
+        [
+          "zero",
+          "infinity",
+          "inf",
+          "nan",
+          "empty",
+          "single"
+        ]
       ],
       "rationale": "Dividing by length-1 is an off-by-one; for a single-element array this is a division by zero, and every other result is the wrong average."
     },
@@ -27,12 +45,30 @@
       "quote": " return values.reduce((a, b) => a + b, 0) / (values.length - 1);",
       "side": "RIGHT",
       "line": 2,
-      "severity": "warning",
+      "severity": "critical",
       "explanationMentions": [
-        "length - 1",
-        "off-by-one",
-        "divid",
-        "zero"
+        [
+          "length - 1",
+          "off-by-one",
+          "off by one",
+          "minus one",
+          "n-1"
+        ],
+        [
+          "divid",
+          "divis",
+          "average",
+          "mean",
+          "sum"
+        ],
+        [
+          "zero",
+          "infinity",
+          "inf",
+          "nan",
+          "empty",
+          "single"
+        ]
       ],
       "rationale": "The same defect, duplicated by a copy-paste into the v2 module."
     }

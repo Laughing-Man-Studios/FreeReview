@@ -12,17 +12,29 @@
       "quote": "  const handle = fs.openSync(path, 'r');",
       "side": "RIGHT",
       "line": 2,
-      "severity": "warning",
+      "severity": "critical",
       "explanationMentions": [
-        "leak",
-        "close",
-        "unclosed",
-        "descriptor",
-        "resource",
-        "handle",
-        "release"
+        [
+          "leak",
+          "close",
+          "unclosed",
+          "descriptor",
+          "resource",
+          "handle",
+          "release",
+          "fd"
+        ],
+        [
+          "emfile",
+          "exhaust",
+          "crash",
+          "denial",
+          "dos",
+          "limit",
+          "too many"
+        ]
       ],
-      "rationale": "The `try/finally` that closed the descriptor was removed in this change, so the handle opened on the added line is never released. Repeated calls exhaust the process's descriptor limit. The defect is introduced here, not pre-existing — which is the difference between a reviewable finding and background noise."
+      "rationale": "The `try/finally` that closed the descriptor was removed in this change, so the handle opened on the added line is never released. Repeated calls exhaust the process's descriptor limit and the process fails with EMFILE. Critical rather than warning because it takes the service down under ordinary traffic, which is what the project's own severity definition reserves critical for. The defect is introduced here, not pre-existing — which is the difference between a reviewable finding and background noise."
     }
   ],
   "expectedNoFindings": [

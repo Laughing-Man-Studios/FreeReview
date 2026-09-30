@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "1880f4ec",
+    "filename": "src/util/clamp.ts",
+    "status": "modified",
+    "additions": 2,
+    "deletions": 1,
+    "changes": 3,
+    "patch": "diff --git a/src/util/clamp.ts b/src/util/clamp.ts\nindex 1111111..2222222 100644\n--- a/src/util/clamp.ts\n+++ b/src/util/clamp.ts\n@@ -1,3 +1,4 @@\n export function clamp(value: number, min: number, max: number): number {\n-  return Math.min(Math.max(value, min), max);\n+  if (Number.isNaN(value)) return min;\n+  return Math.min(Math.max(value, min), max);\n }\n"
+  }
+]

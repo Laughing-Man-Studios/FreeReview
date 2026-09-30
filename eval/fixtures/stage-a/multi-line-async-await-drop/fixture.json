@@ -15,14 +15,31 @@
       "startLine": 2,
       "severity": "critical",
       "explanationMentions": [
-        "await",
-        "async",
-        "promise",
-        "resolv",
-        "not await",
-        "swallow",
-        "catch",
-        "error"
+        [
+          "await",
+          "not await",
+          "never await",
+          "unawaited",
+          "pending",
+          "resolv",
+          "settle",
+          "finish"
+        ],
+        [
+          "promise",
+          "map",
+          "array",
+          "return",
+          "async"
+        ],
+        [
+          "swallow",
+          "catch",
+          "error",
+          "silently",
+          "lost",
+          "discard"
+        ]
       ],
       "rationale": "The loop that awaited each save was replaced with `map`, which returns promises the function never awaits, so the caller resumes before any write completes. The `.catch` additionally swallows the failure, so a rejected save is logged and forgotten. Both defects span the whole added block."
     }

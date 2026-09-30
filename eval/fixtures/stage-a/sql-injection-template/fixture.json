@@ -14,10 +14,27 @@
       "line": 3,
       "severity": "critical",
       "explanationMentions": [
-        "injection",
-        "interpolat",
-        "parameteris",
-        "parameteriz"
+        [
+          "injection",
+          "injected",
+          "sql injection",
+          "injectable"
+        ],
+        [
+          "interpolat",
+          "concatenat",
+          "template",
+          "string build",
+          "inlined"
+        ],
+        [
+          "parameteris",
+          "parameteriz",
+          "bind",
+          "placeholder",
+          "prepared statement",
+          "$1"
+        ]
       ],
       "rationale": "The value is interpolated into the statement instead of bound, so a name containing a quote reaches the parser as SQL. This replaced a correct parameterised query."
     }

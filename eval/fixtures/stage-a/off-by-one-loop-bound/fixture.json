@@ -14,9 +14,28 @@
       "line": 3,
       "severity": "critical",
       "explanationMentions": [
-        "items.length - 1",
-        "last element",
-        "skip"
+        [
+          "items.length - 1",
+          "length - 1",
+          "off-by-one",
+          "off by one",
+          "bound"
+        ],
+        [
+          "last element",
+          "last item",
+          "final element",
+          "final item",
+          "terminal"
+        ],
+        [
+          "skip",
+          "omit",
+          "exclude",
+          "drop",
+          "leave out",
+          "miss"
+        ]
       ],
       "rationale": "The loop bound excludes the final element, so every order total is short by the last line item. Reachable for any non-empty array."
     }

@@ -9,18 +9,38 @@
   "expectedFindings": [
     {
       "path": "src/core/validator.ts",
-      "quote": "  return /^[^@\\s]+@[^@\\s]+\\.[^@\\s]+$/.test(value);",
+      "quote": "  return /^([a-zA-Z0-9]+)+@[a-zA-Z0-9]+\\.[a-zA-Z]+$/.test(value);",
       "side": "RIGHT",
       "line": 2,
       "severity": "warning",
       "explanationMentions": [
-        "crash",
-        "invalid",
-        "throws",
-        "non-string",
-        "null"
+        [
+          "backtrack",
+          "backtrack",
+          "catastrophic",
+          "redos",
+          "reDoS",
+          "exponential",
+          "pathological"
+        ],
+        [
+          "regex",
+          "pattern",
+          "expression",
+          "quantifier"
+        ],
+        [
+          "input",
+          "attacker",
+          "user",
+          "untrusted",
+          "hang",
+          "denial",
+          "dos",
+          "cpu"
+        ]
       ],
-      "rationale": "The regex `.test()` coerces its argument, so a non-string throws a TypeError instead of returning false. The previous implementation was safe for every input."
+      "rationale": "The nested `([a-zA-Z0-9]+)+` quantifier is the textbook catastrophic backtracking shape: input that fails the match near the end forces the engine to explore exponentially many partitions. Verified locally — the pattern did not return within five minutes on a 30-character non-match. `isValidEmail` is applied to user-supplied values, so this is a denial of service reachable from any registration or login form.\n\nNOTE: this replaced a previous version whose rationale claimed the regex `.test()` throws on non-strings while the old `.includes()` was safe. That was backwards — `RegExp.prototype.test` coerces via `String()`, and `(123).includes` throws. That label would have rewarded a model for hallucinating an exception."
     }
   ],
   "expectedNoFindings": [

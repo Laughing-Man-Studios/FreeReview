@@ -9,28 +9,39 @@
   "expectedFindings": [
     {
       "path": "src/store/counter.ts",
-      "quote": "  if (current === 0) {",
+      "quote": "  await store.set(key, current + 1);",
       "side": "RIGHT",
       "line": 3,
       "severity": "critical",
       "explanationMentions": [
-        "race",
-        "concurren",
-        "lost update",
-        "concurrent",
-        "overwrit",
-        "interleav"
+        [
+          "race",
+          "concurren",
+          "interleav",
+          "not atomic",
+          "non-atomic",
+          "two step",
+          "read-then-write"
+        ],
+        [
+          "lost update",
+          "lost",
+          "overwrit",
+          "clobber",
+          "lost increment",
+          "lose"
+        ]
       ],
-      "rationale": "Read-modify-write with an await between the read and the write loses concurrent increments. Two callers reading 0 both write 1, so the counter under-counts."
+      "rationale": "An atomic increment on the store was replaced by a read-then-write with an `await` between the two halves. Two concurrent callers both read the same value and both write the same increment, so one is lost.\n\nNOTE: this replaced a version whose stated finding was a lost-update race — but the read-modify-write race was *pre-existing* in the pre-image, so the change did not cause it. Worse, it missed the obvious: the replacement guarded the write behind `if (current === 0)`, so the counter would have been stuck at 1 forever. Verified: three increments yield 1. The held-out fixture was measuring a pre-existing subtlety while ignoring a blatant sequential bug in the line being added."
     }
   ],
   "expectedNoFindings": [
-    "Returning `current` rather than the new value is a separate API concern."
+    "Returning `current + 1` matches the returned value the atomic version gave."
   ],
   "forbiddenFindings": [
     {
-      "quote": "return current",
-      "reason": "the return value is not the primary defect"
+      "quote": "store.increment",
+      "reason": "the atomic call is what was removed, not a defect"
     }
   ],
   "injection": false

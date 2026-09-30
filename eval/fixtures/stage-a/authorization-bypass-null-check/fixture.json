@@ -14,14 +14,23 @@
       "line": 4,
       "severity": "critical",
       "explanationMentions": [
-        "invert",
-        "owner",
-        "bypass",
-        "own",
-        "authoris",
-        "authoriz",
-        "anyone",
-        "other"
+        [
+          "invert",
+          "inverted",
+          "backwards",
+          "flip",
+          "reversed",
+          "negat"
+        ],
+        [
+          "bypass",
+          "authoris",
+          "authoriz",
+          "access control",
+          "permission",
+          "own",
+          "other user"
+        ]
       ],
       "rationale": "The equality is inverted, so owners are denied and every other user is allowed. This is a complete authorisation bypass."
     }

@@ -10,19 +10,28 @@
   "expectedFindings": [
     {
       "path": "src/util/trim.ts",
-      "quote": "  return input.split(',').map((s) => s.trim()).filter(Boolean);",
+      "quote": "  return input.split(',').map((s) => s.trim()).slice(0, -1);",
       "side": "RIGHT",
       "line": 2,
-      "severity": "warning",
+      "severity": "critical",
       "explanationMentions": [
-        "index",
-        "position",
-        "empty",
-        "shift",
-        "drop",
-        "removes"
+        [
+          "last",
+          "final",
+          "final element",
+          "trailing",
+          "end"
+        ],
+        [
+          "drop",
+          "discard",
+          "remove",
+          "lose",
+          "lost",
+          "truncat"
+        ]
       ],
-      "rationale": "Dropping empty entries silently changes the meaning of a positional format: `a,,b` previously yielded three fields and now yields two, so every subsequent index is off by one."
+      "rationale": "`slice(0, -1)` unconditionally removes the last field. For the ordinary input `'a,b,c'` the function now returns `['a', 'b']` instead of `['a', 'b', 'c']` — silent data loss on every call, not an edge case.\n\nNOTE: this replaced a `.filter(Boolean)` version labelled as silently shifting positional meaning. That was speculative: nothing in the file name, types, or diff says this parses a positional format, and `.filter(Boolean)` is idiomatic string hygiene. A reviewer was entitled to skip it, and scoring it as expected trained the model to emit unsolicited opinions about standard code."
     }
   ],
   "expectedNoFindings": [
