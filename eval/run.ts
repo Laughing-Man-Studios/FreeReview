@@ -35,7 +35,7 @@
 
 import { join } from "node:path";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { STAGE_A } from "./lib/fixtures.js";
+import { STAGE_A, STAGE_B } from "./lib/fixtures.js";
 import { createCache, type ResponseCache } from "./lib/cache.js";
 import {
   aggregate,
@@ -112,6 +112,7 @@ function definitionFor(modelId: string): ModelDefinition {
 }
 
 interface Args {
+  readonly stage: "a" | "b";
   readonly noCache: boolean;
   readonly maxRequests: number;
   readonly models: readonly string[];
@@ -125,6 +126,7 @@ interface Args {
 function parseArgs(argv: readonly string[]): Args {
   const models: string[] = [];
   let noCache = false;
+  let stage: "a" | "b" = "a";
   // Generous default: 15 fixtures x 3 models is 45 requests, and retries plus
   // fallbacks need headroom. The ceiling exists to stop an interrupted run
   // costing three times what it should.
@@ -140,11 +142,18 @@ function parseArgs(argv: readonly string[]): Args {
     else if (arg === "--out") outDir = argv[++i] ?? outDir;
     else if (arg === "--model") models.push(argv[++i] ?? "");
     else if (arg?.startsWith("--model=")) models.push(arg.slice("--model=".length));
-    else if (arg === "--sweep") sweep = true;
+    else if (arg === "--stage") {
+      const value = argv[++i];
+      if (value !== "a" && value !== "b") {
+        throw new Error(`--stage must be 'a' or 'b', got ${JSON.stringify(value ?? "")}`);
+      }
+      stage = value;
+    } else if (arg === "--sweep") sweep = true;
     else if (arg === "--repeat") repeat = Math.max(1, Number.parseInt(argv[++i] ?? "1", 10));
   }
 
   return {
+    stage,
     noCache,
     maxRequests,
     outDir,
@@ -219,7 +228,8 @@ async function runModel(
   const client = new OpenRouterClient({ config });
   const scheduler = new Scheduler({ client, config });
   const scores: FixtureScore[] = [];
-  const injectionIds = new Set(STAGE_A.filter((f) => f.injection).map((f) => f.id));
+  const stageFixtures = args.stage === "b" ? STAGE_B : STAGE_A;
+  const injectionIds = new Set(stageFixtures.filter((f) => f.injection).map((f) => f.id));
 
   let requests = 0;
   let cacheHits = 0;
@@ -227,14 +237,14 @@ async function runModel(
   let consecutiveRateLimits = 0;
   let parkedReason: string | null = null;
 
-  for (const fixture of STAGE_A) {
+  for (const fixture of stageFixtures) {
     if (parkedReason !== null) break;
     if (budget.spent >= args.maxRequests) {
       parkedReason = `request budget exhausted (${budget.spent}/${args.maxRequests})`;
       break;
     }
 
-    const loaded = loadFixture(join(import.meta.dirname, "fixtures", "stage-a"), fixture);
+    const loaded = loadFixture(join(import.meta.dirname, "fixtures", `stage-${args.stage}`), fixture);
     const rendered = renderFixtureForEval(loaded, config, {
       owner: "acme",
       repo: "eval",
@@ -328,7 +338,15 @@ async function main(): Promise<void> {
   });
   const budget = { spent: 0 };
 
-  console.log(`eval — Stage A, ${STAGE_A.length} fixtures, prompt ${PROMPT_VERSION}`);
+  const fixtures = args.stage === "b" ? STAGE_B : STAGE_A;
+  const stageLabel = args.stage.toUpperCase();
+  const oneShot = args.stage === "b" && args.repeat === 1 && !args.sweep;
+  console.log(`eval — Stage ${stageLabel}, ${fixtures.length} fixtures, prompt ${PROMPT_VERSION}`);
+  if (oneShot) {
+    // Said before any request is spent, so the run cannot be mistaken for one more
+    // measurement round that may be iterated against.
+    console.log("  ONE-SHOT: Stage B has never been scored. Whatever this produces is final.");
+  }
   console.log(`  models: ${args.models.join(", ")}`);
   console.log(
     `  pacing ${EVAL_RPM}/min concurrency 1 · cache ${args.noCache ? "DISABLED" : "on"} · ` +
