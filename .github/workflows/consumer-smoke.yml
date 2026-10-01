@@ -55,7 +55,7 @@ jobs:
           git commit --allow-empty -m "test: exercise FreeReview@$REF on a clean diff"
 
           PUSHED=0
-          if ! git push --force origin "$BRANCH"; then PUSHED=1; fi
+          if git push --force origin "$BRANCH"; then PUSHED=1; fi
           # The branch may already exist from a previous run, in which case a PR may
           # already be open against it.
           if [ "$PUSHED" = "0" ]; then
