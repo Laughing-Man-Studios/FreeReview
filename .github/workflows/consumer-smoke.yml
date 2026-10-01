@@ -14,8 +14,10 @@ on:
 # the action as a published ref and runs the committed bundle; if that works, the
 # packaging works. Building here and running that would prove something different
 # and easier.
+# `contents: write` is required to push the probe branch at all — opening a pull
+# request is not enough without it. Scoped to this workflow and this repository.
 permissions:
-  contents: read
+  contents: write
   pull-requests: write
 
 jobs:
