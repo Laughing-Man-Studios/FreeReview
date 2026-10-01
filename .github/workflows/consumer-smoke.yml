@@ -32,7 +32,7 @@ jobs:
           echo "committed bundle:  $([ -f dist/index.js ] && echo yes || echo no)"
           echo "installing from:   ${{ inputs.ref }}"
 
-      - name: Open a pull request that exercises the action
+      - name: Push the probe branch
         id: pr
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -71,34 +71,52 @@ jobs:
 
           git checkout main 2>/dev/null || git checkout master
 
-          PR_NUMBER=$(gh pr create \
-            --head "$BRANCH" \
-            --title "test: exercise FreeReview@$REF on a clean diff" \
-            --body "Automated consumer smoke test. Installs the published action ref and opens a pull request so the action runs against a diff this repository did not author.\n\nThe probe workflow is pinned to \`$REF\`." \
-            | grep -oE '[0-9]+$')
-          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          # Deliberately does NOT create the pull request.
+          #
+          # The organisation forbids GitHub Actions from creating or approving pull
+          # requests — the same restriction that removed release-please from this
+          # repository. The API returns "GitHub Actions is not permitted to create or
+          # approve pull requests". Working around it with a personal token would be
+          # exactly the kind of quietly-defeated control this project rejects, so the
+          # workflow pushes the branch and waits; a maintainer opens the pull request.
+          echo "branch=$BRANCH" >> "$GITHUB_OUTPUT"
+          echo "open https://github.com/$GITHUB_REPOSITORY/pull/new/$BRANCH"
 
       - name: Wait for the review to appear
         id: wait
-        uses: actions/github-script@v7
         env:
-          PR_NUMBER: ${{ steps.pr.outputs.number }}
-        with:
-          script: |
-            const deadline = Date.now() + 8 * 60 * 1000;
-            while (Date.now() < deadline) {
-              const { data } = await github.rest.issues.listComments({
-                owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER),
-              });
-              const review = data.find(c => c.user?.type === "Bot" && /FreeReview/.test(c.body ?? ""));
-              if (review) {
-                core.setOutput("found", "true");
-                core.info(review.body.slice(0, 800));
-                return;
-              }
-              await new Promise(r => setTimeout(r, 15000));
-            }
-            core.setOutput("found", "false");
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          BRANCH: ${{ steps.pr.outputs.branch }}
+        run: |
+          set -euo pipefail
+          # Resolving the pull request from the branch, because this workflow is not
+          # permitted to create one. A maintainer opens it; the automation verifies.
+          PR_NUMBER=""
+          for _ in $(seq 1 20); do
+            PR_NUMBER=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+            [ -n "$PR_NUMBER" ] && break
+            sleep 15
+          done
+
+          if [ -z "$PR_NUMBER" ]; then
+            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "No pull request exists for branch $BRANCH. This organisation forbids" >&2
+            echo "Actions from creating one, so it must be opened manually:" >&2
+            echo "  https://github.com/$GITHUB_REPOSITORY/pull/new/$BRANCH" >&2
+            exit 0
+          fi
+          echo "Pull request #$PR_NUMBER found."
+
+          for _ in $(seq 1 40); do
+            BODY=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --jq '[.[] | select(.user.type=="Bot") | .body] | join("\n---\n")')
+            if printf '%s' "$BODY" | grep -q "FreeReview"; then
+              echo "found=true" >> "$GITHUB_OUTPUT"
+              echo "Review comment:"; printf '%s\n' "$BODY" | head -40
+              exit 0
+            fi
+            sleep 15
+          done
+          echo "found=false" >> "$GITHUB_OUTPUT"
 
       - name: Report
         if: always()
@@ -114,7 +132,7 @@ jobs:
               echo
               echo "This is the Phase 8 exit criterion: a tagged release installs and runs."
             else
-              echo "No review comment appeared within 8 minutes."
+              echo "No review comment appeared within 10 minutes, or no pull request was open."
               echo
               echo "**This does not necessarily mean the action is broken.** A run can legitimately"
               echo "produce no findings, and the body says so rather than staying silent — but it"
