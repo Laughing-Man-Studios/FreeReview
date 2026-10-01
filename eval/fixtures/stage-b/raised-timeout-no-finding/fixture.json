@@ -1,0 +1,28 @@
+{
+  "id": "raised-timeout-no-finding",
+  "category": "no-finding",
+  "split": "held-out",
+  "proves": "HELD OUT. A change that looks like a regression and is not. A reviewer that flags every suspicious-looking diff is the failure mode precision is meant to catch, and Stage B otherwise contains no fixture that tests for it.",
+  "files": [
+    "src/http/client.ts"
+  ],
+  "expectedFindings": [],
+  "expectedNoFindings": [
+    "`retries` is unchanged. Raising a timeout is a deliberate latency trade and is not a defect on its own — nothing here makes a request unbounded, and the retry count is untouched."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "timeoutMs: 15_000,",
+      "reason": "a deliberate, bounded timeout change"
+    },
+    {
+      "quote": "retries: 3",
+      "reason": "an unchanged context line"
+    },
+    {
+      "quote": "timeoutMs: 5_000,",
+      "reason": "an unchanged context line"
+    }
+  ],
+  "injection": false
+}

@@ -2,7 +2,7 @@
   "id": "falsy-zero-is-valid",
   "category": "correctness:falsy-coercion",
   "split": "held-out",
-  "proves": "HELD OUT. A guard that treats a legitimate value as absent. Nothing about the changed line looks wrong in isolation; it is only wrong against the declared type and the callers. Rewards reading rather than pattern-matching.",
+  "proves": "HELD OUT. A guard tightened into one that treats a legitimate zero as absent. The changed line is a one-line comparison swap that reads as an innocuous simplification; the regression is only visible by working out what the old condition did not match. Rewards reading rather than pattern-matching.",
   "files": [
     "src/billing/summary.ts"
   ],
@@ -15,7 +15,6 @@
       "severity": "warning",
       "explanationMentions": [
         [
-          "0",
           "zero",
           "falsy",
           "falsey",
@@ -31,11 +30,11 @@
           "zero-priced"
         ]
       ],
-      "rationale": "`!count` and `!total` are true for 0, which is a legitimate value for both: a subscription with a zero-dollar invoice, or a usage summary for a period with zero items, would be described as 'no usage' rather than as zero. The comparison should be `count === 0 || total === 0`, or absent values should be checked with `== null`.\n\nA reviewer that treats `if (!x)` as idiomatic will pass this; a reviewer that checks the declared type will catch it."
+      "rationale": "The pre-image returned 'no usage' only when *both* values were zero, so `describeUsage(3, 0)` — three items on a fully discounted, zero-dollar invoice — returned \"3 items totalling 0\". The replacement returns 'no usage' for that input, because `!total` is true whenever the total is zero however many items there are.\n\nSo the change loses information for every zero-total invoice rather than only for empty periods. The intended check is `count === 0`, or `== null` if absent values also need handling.\n\nThe first version of this fixture expected a finding while the diff only collapsed braces onto pre-existing code — the defect was on both sides, so it was not caused by the change at all."
     }
   ],
   "expectedNoFindings": [
-    "Collapsing the braces to a single line is a style change."
+    "The returned template string is unchanged and correct."
   ],
   "forbiddenFindings": [
     {

@@ -1,0 +1,48 @@
+{
+  "id": "loose-equality-coerces-null",
+  "category": "correctness:loose-equality",
+  "split": "held-out",
+  "proves": "HELD OUT. `==` against a number, where `null == 0` is true. The changed line reads as a harmless refactor of an existing comparison.",
+  "files": [
+    "src/billing/cart.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/billing/cart.ts",
+      "quote": "  return cart.discount == 0;",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "warning",
+      "explanationMentions": [
+        [
+          "loose",
+          "===",
+          "coerc",
+          "nullish",
+          "implicit",
+          "double equals"
+        ],
+        [
+          "free",
+          "discount",
+          "treated",
+          "cart",
+          "wrong",
+          "incorrect",
+          "skipped"
+        ]
+      ],
+      "rationale": "`cart.discount == 0` is true when `discount` is `null`, `undefined`, `''`, `false` or `[]`, not only when it is the number zero. A cart whose discount has not been computed yet — `null` from the database — is therefore treated as free, which is a billing defect in the permissive direction.\\n\\n`=== 0` is the correct comparison, or `cart.discount == null` if the intent was a nullish check. The diff did not introduce the loose comparison, but it rewrote the guard around it into a single return that reads as a simplification, and it is the line under review."
+    }
+  ],
+  "expectedNoFindings": [
+    "The function signature is unchanged."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export function isFree",
+      "reason": "the signature did not change"
+    }
+  ],
+  "injection": false
+}

@@ -1,0 +1,24 @@
+{
+  "id": "pure-identifier-rename-no-finding",
+  "category": "no-finding",
+  "split": "held-out",
+  "proves": "HELD OUT. A rename applied consistently across every reference, with no behaviour change. A model that reports anything here is inventing, and the fixture exists to make that visible.",
+  "files": [
+    "src/http/uploads.ts"
+  ],
+  "expectedFindings": [],
+  "expectedNoFindings": [
+    "`safe` is renamed to `resolved` at both its declaration and its only use. The behaviour is identical and there is nothing to report."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "const resolved = basename(name);",
+      "reason": "a rename, not a defect"
+    },
+    {
+      "quote": "return readFile(join(UPLOAD_DIR, resolved));",
+      "reason": "a rename, not a defect"
+    }
+  ],
+  "injection": false
+}

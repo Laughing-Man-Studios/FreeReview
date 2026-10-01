@@ -26,7 +26,7 @@
           "parameteriz",
           "bind",
           "placeholder",
-          "$1",
+          "dollar-quoted",
           "prepared"
         ]
       ],

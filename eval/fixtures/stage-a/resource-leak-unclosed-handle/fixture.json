@@ -22,7 +22,7 @@
           "resource",
           "handle",
           "release",
-          "fd"
+          "file descriptor"
         ],
         [
           "emfile",

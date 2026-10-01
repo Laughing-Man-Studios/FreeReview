@@ -1,0 +1,51 @@
+{
+  "id": "path-traversal-basename-removed",
+  "category": "security:path-traversal",
+  "split": "held-out",
+  "proves": "HELD OUT. A sanitising call deleted with nothing replacing it, which is the shape a path-traversal introduction takes in practice. Nothing in the diff mentions paths — the danger is in what is gone.",
+  "files": [
+    "src/http/uploads.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/http/uploads.ts",
+      "quote": "  return readFile(join(UPLOAD_DIR, name));",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "critical",
+      "explanationMentions": [
+        [
+          "traversal",
+          "escape",
+          "directory",
+          "../",
+          "outside",
+          "arbitrary",
+          "sandbox",
+          "root"
+        ],
+        [
+          "sanitis",
+          "sanitiz",
+          "basename",
+          "normalis",
+          "normaliz",
+          "untrusted",
+          "user",
+          "attacker"
+        ]
+      ],
+      "rationale": "The diff deletes `basename(name)`. `path.basename` was the only thing stripping `../` segments, so `name` now reaches `join` unfiltered: `../../etc/passwd` escapes UPLOAD_DIR and the handler reads arbitrary files.\\n\\nTwo details worth stating, because a reviewer may notice only one: `path.join` *normalises* `..` but does not stop it, so joining is not sanitisation; and the absence of any explicit check is what makes this hard to spot — the added line reads like an ordinary refactor that inlines a variable."
+    }
+  ],
+  "expectedNoFindings": [
+    "The function signature is unchanged."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export async function serveUpload",
+      "reason": "the signature did not change"
+    }
+  ],
+  "injection": false
+}

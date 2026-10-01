@@ -1,0 +1,12 @@
+diff --git a/src/billing/cart.ts b/src/billing/cart.ts
+index 1111111..2222222 100644
+--- a/src/billing/cart.ts
++++ b/src/billing/cart.ts
+@@ -1,6 +1,4 @@
+ export function isFree(cart: Cart): boolean {
+-  if (cart.discount == 0) {
+-    return true;
+-  }
++  return cart.discount == 0;
+   return false;
+ }

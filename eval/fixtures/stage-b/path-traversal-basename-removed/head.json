@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "1a3ffd17",
+    "filename": "src/http/uploads.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 2,
+    "changes": 3,
+    "patch": "diff --git a/src/http/uploads.ts b/src/http/uploads.ts\nindex 1111111..2222222 100644\n--- a/src/http/uploads.ts\n+++ b/src/http/uploads.ts\n@@ -1,4 +1,3 @@\n export async function serveUpload(name: string): Promise<Buffer> {\n-  const safe = basename(name);\n-  return readFile(join(UPLOAD_DIR, safe));\n+  return readFile(join(UPLOAD_DIR, name));\n }\n"
+  }
+]

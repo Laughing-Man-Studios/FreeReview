@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "2e1e4dba",
+    "filename": "src/http/client.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 1,
+    "changes": 2,
+    "patch": "diff --git a/src/http/client.ts b/src/http/client.ts\nindex 1111111..2222222 100644\n--- a/src/http/client.ts\n+++ b/src/http/client.ts\n@@ -1,5 +1,5 @@\n export const DEFAULTS = {\n   timeoutMs: 5_000,\n-  timeoutMs: 5_000,\n+  timeoutMs: 15_000,\n   retries: 3,\n } as const;\n"
+  }
+]

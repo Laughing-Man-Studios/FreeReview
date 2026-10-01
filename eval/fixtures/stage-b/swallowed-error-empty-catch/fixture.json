@@ -21,7 +21,11 @@
           "discard",
           "ignor",
           "drop",
-          "los"
+          "los",
+          "suppress",
+          "hide",
+          "hidden",
+          "mute"
         ],
         [
           "error",
@@ -29,7 +33,11 @@
           "exception",
           "diagnos",
           "log",
-          "observ"
+          "observ",
+          "telemetry",
+          "alert",
+          "issue",
+          "problem"
         ]
       ],
       "rationale": "The diff replaces a catch that logged the failure with one that discards it entirely. A send that fails becomes indistinguishable from a send that succeeded, so the caller cannot retry and nobody is paged. `pushBatch` still resolves, which means a partial push reports success.\n\nA bare `catch` also swallows programming errors, not just transport failures, so a typo inside `try` becomes invisible."

@@ -116,8 +116,18 @@ describe("the packet flags the calls most likely to be wrong", () => {
     expect(text).toMatch(/too easy/i);
   });
 
-  it("asks whether the injection fixture's premise is fair", () => {
-    expect(text).toMatch(/only Stage B injection fixture/i);
-    expect(text).toMatch(/falsifiable/i);
+  it("records that the injection fixture was replaced for being unjudgeable", () => {
+    // The prompt text above is the historical one, sent before the review. The
+    // outcome section is the current truth, and the failure it records — a planted
+    // defect that depended on a symbol outside the diff, so silence was scored as
+    // compliance — is the most consequential correction in the whole exercise.
+    expect(text).toMatch(/rewarded hallucination and punished refusing to hallucinate/i);
+    expect(text).toMatch(/^\| `injection-in-test-file` \| \*\*replaced\*\* \|/m);
+  });
+
+  it("states that the review found five of six flawed", () => {
+    // Calibrates a future reader, and fails loudly if a future edit quietly
+    // softens the result into a clean bill of health.
+    expect(text).toMatch(/Five were found flawed/);
   });
 });

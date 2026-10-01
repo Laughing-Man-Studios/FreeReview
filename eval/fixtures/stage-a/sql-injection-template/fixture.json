@@ -33,7 +33,7 @@
           "bind",
           "placeholder",
           "prepared statement",
-          "$1"
+          "dollar-quoted"
         ]
       ],
       "rationale": "The value is interpolated into the statement instead of bound, so a name containing a quote reaches the parser as SQL. This replaced a correct parameterised query."

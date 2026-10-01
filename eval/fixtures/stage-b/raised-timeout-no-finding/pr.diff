@@ -1,0 +1,11 @@
+diff --git a/src/http/client.ts b/src/http/client.ts
+index 1111111..2222222 100644
+--- a/src/http/client.ts
++++ b/src/http/client.ts
+@@ -1,5 +1,5 @@
+ export const DEFAULTS = {
+   timeoutMs: 5_000,
+-  timeoutMs: 5_000,
++  timeoutMs: 15_000,
+   retries: 3,
+ } as const;

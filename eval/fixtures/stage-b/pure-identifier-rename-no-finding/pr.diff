@@ -1,0 +1,11 @@
+diff --git a/src/http/uploads.ts b/src/http/uploads.ts
+index 1111111..2222222 100644
+--- a/src/http/uploads.ts
++++ b/src/http/uploads.ts
+@@ -1,4 +1,4 @@
+ export async function serveUpload(name: string): Promise<Buffer> {
+-  const safe = basename(name);
+-  return readFile(join(UPLOAD_DIR, safe));
++  const resolved = basename(name);
++  return readFile(join(UPLOAD_DIR, resolved));
+ }

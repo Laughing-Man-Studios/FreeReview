@@ -2,11 +2,9 @@ diff --git a/src/billing/summary.ts b/src/billing/summary.ts
 index 1111111..2222222 100644
 --- a/src/billing/summary.ts
 +++ b/src/billing/summary.ts
-@@ -1,6 +1,4 @@
+@@ -1,4 +1,4 @@
  export function describeUsage(count: number, total: number): string {
--  if (!count || !total) {
--    return 'no usage';
--  }
+-  if (count === 0 && total === 0) return 'no usage';
 +  if (!count || !total) return 'no usage';
    return `${count} items totalling ${total}`;
  }

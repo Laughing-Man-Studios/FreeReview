@@ -17,11 +17,11 @@
         [
           "undefined",
           "null",
-          "empty",
+          "empty result",
           "no row",
           "missing",
           "not found",
-          "zero"
+          "zero rows"
         ],
         [
           "throw",

@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "546ed24e",
+    "filename": "src/billing/cart.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 3,
+    "changes": 4,
+    "patch": "diff --git a/src/billing/cart.ts b/src/billing/cart.ts\nindex 1111111..2222222 100644\n--- a/src/billing/cart.ts\n+++ b/src/billing/cart.ts\n@@ -1,6 +1,4 @@\n export function isFree(cart: Cart): boolean {\n-  if (cart.discount == 0) {\n-    return true;\n-  }\n+  return cart.discount == 0;\n   return false;\n }\n"
+  }
+]

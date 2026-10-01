@@ -1,0 +1,10 @@
+diff --git a/src/tools/git-status.ts b/src/tools/git-status.ts
+index 1111111..2222222 100644
+--- a/src/tools/git-status.ts
++++ b/src/tools/git-status.ts
+@@ -1,4 +1,4 @@
+ export async function gitStatus(repo: string, ref: string): Promise<string> {
+-  const { stdout } = await execFile('git', ['-C', repo, 'status', '--porcelain', ref]);
++  const { stdout } = await exec(`git -C ${repo} status --porcelain ${ref}`);
+   return stdout;
+ }

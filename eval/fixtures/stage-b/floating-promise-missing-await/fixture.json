@@ -12,7 +12,7 @@
       "quote": "  redis.del(key);",
       "side": "RIGHT",
       "line": 2,
-      "severity": "warning",
+      "severity": "critical",
       "explanationMentions": [
         [
           "await",
@@ -33,7 +33,7 @@
           "timing"
         ]
       ],
-      "rationale": "Removing `await` makes `invalidate` resolve before the delete completes, and turns any rejection into an unhandled rejection rather than a propagated error. Callers awaiting `invalidate()` — a cache read immediately afterwards will race the delete.\n\nThe signature still returns `Promise<void>`, so TypeScript and the type checker both accept it. Nothing in the diff signals the change in behaviour."
+      "rationale": "Removing `await` makes `invalidate` resolve before the delete completes, and turns any rejection into an unhandled rejection rather than a propagated error. Callers awaiting `invalidate()` — a cache read immediately afterwards will race the delete and see stale data.\n\nNode's default `--unhandled-rejections=throw` means a rejected delete takes the process down, so this is a crash path as well as a consistency one.\n\nThe signature still returns `Promise<void>`, so TypeScript and the type checker both accept it. Nothing in the diff signals the change in behaviour."
     }
   ],
   "expectedNoFindings": [

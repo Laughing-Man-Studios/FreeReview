@@ -411,3 +411,74 @@ different wording, because `dedupe` treats differing explanations as genuinely
 different findings. That is defensible — as the example above shows, they often
 are — but it means the deduplication guarantee is weaker than "one comment per
 line". Worth deciding deliberately later; not a bug.
+
+
+---
+
+# Stage B ground truth — cross-examined 2026-10-01
+
+Six fixtures went to an independent reviewer. **Five were found flawed.** Recorded
+here because the yield is the point: the properties the repository claimed to
+check were not the properties that were broken.
+
+| Fixture | Verdict | Defect in the label |
+|---|---|---|
+| `prototype-pollution-merge` | deleted | Shallow `Object.assign` alters the target's prototype; it does not pollute `Object.prototype`. Verified directly: `(Object.assign)` and the pre-image `for…of` loop behave identically, so the diff caused nothing. It also scored a known LLM hallucination as correct. |
+| `falsy-zero-is-valid` | rewritten | The diff only collapsed braces. The falsy guard was on both sides — a pre-existing defect, the Stage A `resource-leak` mistake repeated. |
+| `injection-in-test-file` | replaced | The planted defect referenced a symbol defined in another file, so a competent reviewer had no basis to call it wrong. Silence was then scored as injection compliance: the fixture **rewarded hallucination and punished refusing to hallucinate**. |
+| `swallowed-error-empty-catch` | fixed | A two-line anchor with no tolerance, so a model obeying "quote the smallest span" scored a miss. Plus missing synonyms for the most common way to describe an empty catch. |
+| `floating-promise-missing-await` | fixed | `warning` understated it. Node's default unhandled-rejection handling makes it a crash, by my own severity rubric, and Stage A's equivalent was already `critical`. |
+| `insecure-randomness-for-token` | kept | Confirmed not a freebie — it is the negative control for baseline security literacy. |
+
+Three gaps raised that were not corrections:
+
+- **No zero-finding fixtures existed.** Every fixture expected exactly one finding,
+  so a model reporting something on every diff scores recall 1.00. Precision on
+  clean code was entirely unmeasured. Added two.
+- **Command injection was absent from both stages.** Added.
+- **`"0"` as a required substring** is satisfied by any zero in an explanation —
+  a line number, a status code, an array index. Fixed across every stage, along
+  with `"fd"` and `"$1"`.
+
+Rejected, and the reasoning recorded: the reviewer proposed that
+`resource-leak-unclosed-handle` also anchors on carried-over code. It removes the
+`try/finally` that closed the handle and re-adds the identical `fs.openSync` line;
+commenting there is correct. No line-level rule separates that from a genuinely
+pre-existing defect — only a whole-diff "changes no behaviour" check can, which is
+what the new causality test uses.
+
+## Stage B is now 10 fixtures / 8 expected findings
+
+| Mechanism | Fixture |
+|---|---|
+| `correctness:falsy-coercion` | `falsy-zero-is-valid` |
+| `correctness:error-suppression` | `swallowed-error-empty-catch` |
+| `correctness:async-contract` | `floating-promise-missing-await` |
+| `correctness:loose-equality` | `loose-equality-coerces-null` |
+| `security:weak-prng` | `insecure-randomness-for-token` |
+| `security:path-traversal` | `path-traversal-basename-removed` |
+| `security:command-injection` | `command-injection-exec-true` |
+| `injection:test-file` | `injection-in-test-file` |
+| `no-finding` | `pure-identifier-rename-no-finding` |
+| `no-finding` | `raised-timeout-no-finding` |
+
+## What this size can and cannot support
+
+One miss moves recall by 12.5%. A 95% Wilson interval on a 7/8 score spans
+roughly **[47%, 97%]**.
+
+So Stage B can catch a large difference and cannot rank two comparable models. A
+model scoring 7/8 and one scoring 8/8 are not distinguishable here, and any
+threshold finer than a whole fixture is noise.
+
+This is a structural limit, not a fixable one: growing the held-out set requires
+authoring fixtures and cross-examining them, and the cross-examination yields
+roughly one flawed fixture in three. Ten is the honest ceiling for the effort
+available, and it should be reported as a smoke test rather than a measurement.
+
+## Scoring rules this establishes
+
+Stage B has not been scored. It is scored **once**, and afterwards the project has
+no uncontaminated held-out data — at which point thresholds must be justified
+argumentatively rather than discovered, because there is nothing left to
+discover them on.
