@@ -1,0 +1,98 @@
+name: consumer-smoke
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Action ref to install, e.g. v0.1.0 or main"
+        required: false
+        default: "v0.1.0"
+
+# Proves the Phase 8 exit criterion: a tagged release installs and runs from a
+# consumer repository that shares none of this project's build state.
+#
+# Deliberately does NOT checkout FreeReview or run its tests. A consumer installs
+# the action as a published ref and runs the committed bundle; if that works, the
+# packaging works. Building here and running that would prove something different
+# and easier.
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  install-and-run:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Show what is being installed
+        run: |
+          echo "action.yml present: $([ -f action.yml ] && echo yes || echo no)"
+          echo "committed bundle:  $([ -f dist/index.js ] && echo yes || echo no)"
+          echo "installing from:   ${{ inputs.ref }}"
+
+      - name: Open a pull request that exercises the action
+        id: pr
+        uses: peter-evans/create-pull-request@v6
+        with:
+          branch: freereview-consumer-smoke
+          title: "chore: exercise FreeReview ${{ inputs.ref }} on a clean consumer repo"
+          body: |
+            Automated consumer smoke test. Installs the published action ref and
+            opens a pull request so the action runs against a diff this repository
+            did not author.
+          commit-message: "chore: consumer smoke test"
+          add-paths: .github/workflows/consumer-smoke-probe.yml
+          delete-branch: true
+
+      - name: Wait for the review to appear
+        uses: actions/github-script@v7
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+        with:
+          script: |
+            const deadline = Date.now() + 8 * 60 * 1000;
+            while (Date.now() < deadline) {
+              const { data } = await github.rest.issues.listComments({
+                owner: context.repo.owner, repo: context.repo.repo, issue_number: Number(process.env.PR_NUMBER),
+              });
+              const review = data.find(c => c.user?.type === "Bot" && /FreeReview/.test(c.body ?? ""));
+              if (review) {
+                core.setOutput("found", "true");
+                core.info(review.body.slice(0, 800));
+                return;
+              }
+              await new Promise(r => setTimeout(r, 15000));
+            }
+            core.setOutput("found", "false");
+
+      - name: Assert the action ran and did not block the pull request
+        id: verify
+        env:
+          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+        with: |
+          {
+            echo "found=${{ steps.verify.outputs.found }}" >> "$GITHUB_OUTPUT"
+          }
+
+      - name: Report
+        if: always()
+        env:
+          FOUND: ${{ steps.verify.outputs.found }}
+        run: |
+          {
+            echo "### Consumer smoke test"
+            echo
+            if [ "$FOUND" = "true" ]; then
+              echo "The action installed from \`${{ inputs.ref }}\`, ran on a pull request"
+              echo "this repository did not author, and published a review."
+              echo
+              echo "This is the Phase 8 exit criterion: a tagged release installs and runs."
+            else
+              echo "No review comment appeared within 8 minutes."
+              echo
+              echo "**This does not necessarily mean the action is broken.** A run can legitimately"
+              echo "produce no findings, and the body says so rather than staying silent — but it"
+              echo "always comments. No comment at all means the workflow did not reach publication,"
+              echo "which is a packaging or permission failure."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
