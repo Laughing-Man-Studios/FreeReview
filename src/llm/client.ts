@@ -109,7 +109,29 @@ export interface OpenRouterClientOptions {
   readonly sleep?: (ms: number) => Promise<void>;
 }
 
-/** Build the provider routing block. */
+/**
+ * Build the provider routing block.
+ *
+ * ## The privacy gap this does not close, and the one it partly does
+ *
+ * `zdr: true` and `data_collection: "deny"` are *constraints*, not a guarantee
+ * about identity. OpenRouter routes to any endpoint meeting them, and a provider
+ * can be attached to a model after the date we last checked it. The endpoint APIs
+ * that would let us enumerate and pin providers return 403 for anything short of a
+ * management key, and a management key cannot call the completions API — so
+ * verifying provider identity at runtime would cost two secrets and an
+ * account-admin credential. Rejected; see SECURITY.md.
+ *
+ * `provider.only` is the only enforcement tightening available without one. It
+ * converts "any provider meeting the constraint" into "these named providers",
+ * so a provider attached *after* verification cannot be selected unless it is on
+ * the list.
+ *
+ * The trade is availability: a provider that stops serving `:free` ends the
+ * review rather than silently switching to an unverified one. At 8 requests per
+ * run that is the right way round — an unavailable reviewer is visible, an
+ * unverified one is not.
+ */
 export function buildProviderBlock(config: Config, mode: CapabilityMode): Record<string, unknown> {
   const provider: Record<string, unknown> = {
     // Guard 3: a hard filter OpenRouter enforces by refusing to route. A `:free`
@@ -121,6 +143,12 @@ export function buildProviderBlock(config: Config, mode: CapabilityMode): Record
   if (config.privacyMode === "strict") {
     provider["zdr"] = true;
     provider["data_collection"] = "deny";
+
+    // Only ever in strict. Pinning providers under `relaxed` would imply a
+    // privacy guarantee the caller has explicitly opted out of.
+    if (config.strictProviders.length > 0) {
+      provider["only"] = [...config.strictProviders];
+    }
   }
 
   // `require_parameters: true` excludes every endpoint that does not support

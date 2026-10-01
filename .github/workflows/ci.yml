@@ -94,6 +94,13 @@ jobs:
       - name: golden dataset ground truth
         run: npm run validate:fixtures
 
+      - name: Report catalog state
+        # Non-blocking by design. The free catalog is a third party and a drifting
+        # one is not our outage — but a green run here is informative rather than
+        # silent, so a change in ZDR availability or measured modes is visible in
+        # the log even when nothing has broken yet.
+        run: npm run verify-models
+
   full-suite:
     name: full test suite (all directories)
     runs-on: ubuntu-latest

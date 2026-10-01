@@ -57,6 +57,31 @@ These are enforced by test assertions in CI against the shipped bundle
   `provider.max_price` is pinned to zero, which OpenRouter enforces by refusing
   to route — so even a misconfiguration cannot produce a bill.
 
+## Credential redaction in published output
+
+A diff can contain a credential — that is a realistic scenario, not a
+hypothetical one, and reviewing the code a human pushed means reading it. So a
+finding about a hardcoded key naturally quotes the key back.
+
+FreeReview redacts credential-shaped substrings from everything it publishes: the
+review body, the step summary, the quoted source block, and the `suggestion` block
+(the last matters most, since accepting a suggestion writes it into the branch). A
+short tail is kept so the finding stays actionable.
+
+The patterns are deliberately conservative and prefix-anchored, because this runs
+on every review: the correct fix for a hardcoded key is `apiKey: process.env.API_KEY`,
+and redacting that would destroy the suggestion while leaving the real secret in
+prose. Covered shapes are vendor-prefixed keys (`sk-`, `pk-`, `rk-`), AWS access key
+ids, GitHub/Slack/Google/SendGrid tokens, JWTs, PEM private-key headers, and
+credentials in assignments.
+
+**Not covered, and not claimed to be:** a high-entropy secret with no recognised
+prefix, no assignment and no PEM header is not detected. Redaction reduces the
+blast radius of an echoed credential; it does not make credentials safe to commit.
+Rotating a leaked key remains the only fix.
+
+---
+
 ## Prompt injection
 
 Repository content is untrusted and may contain text engineered to look like
@@ -100,7 +125,13 @@ What it does instead:
 
 - Requests carry the routing constraints, and OpenRouter enforces them.
 - The default model pool carries manually verified privacy posture in source,
-  with the verification date recorded.
+  with the verification date recorded (`privacyVerifiedOn`).
+- `strict_providers` optionally pins `provider.only` to named providers under
+  `strict`, so a provider attached to a model *after* verification cannot be
+  selected. Empty by default, because pinning narrows availability: a provider
+  that stops serving the free tier ends the review rather than silently switching
+  to an unverified one. That trade is deliberate — an unavailable reviewer is
+  visible, an unverified one is not.
 - Models whose provider documents training or logging on free usage are present
   in the code but **disabled by default**, and remain reachable only under
   `relaxed`.

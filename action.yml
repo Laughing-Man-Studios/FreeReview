@@ -31,6 +31,11 @@ inputs:
     required: false
     default: "strict"
 
+  strict_providers:
+    description: "Comma-separated OpenRouter provider slugs to pin under 'strict', sent as provider.only. Empty (default) leaves routing unconstrained. Narrows availability: a provider that stops serving the free tier ends the review rather than silently switching to an unverified one."
+    required: false
+    default: ""
+
   primary_model:
     description: "Explicit ':free' OpenRouter model ID. Defaults to the bundled primary. Non-':free' IDs are rejected before any network call."
     required: false

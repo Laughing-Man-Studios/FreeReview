@@ -229,6 +229,23 @@ function readPrivacyMode(env) {
   if (raw === "strict" || raw === "relaxed") return raw;
   throw new ConfigError("privacy_mode", `'${raw}' is not a valid mode. Use strict or relaxed.`);
 }
+function readStrictProviders(env) {
+  const raw = readRaw(env, "strict_providers");
+  if (raw === void 0) return [];
+  const seen = /* @__PURE__ */ new Set();
+  for (const part of raw.split(",")) {
+    const slug = part.trim().toLowerCase();
+    if (slug.length === 0) continue;
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(slug)) {
+      throw new ConfigError(
+        "strict_providers",
+        `${JSON.stringify(slug)} is not a valid provider slug. Use OpenRouter's provider slugs, comma-separated, e.g. "novita,fireworks".`
+      );
+    }
+    seen.add(slug);
+  }
+  return [...seen];
+}
 function parseModelList(value, input2) {
   if (value === void 0) return void 0;
   const ids = value.split(",").map((s) => s.trim()).filter((s) => s.length > 0);
@@ -269,6 +286,7 @@ function loadConfig(env = process.env) {
     );
   }
   const privacyMode = readPrivacyMode(env);
+  const strictProviders = readStrictProviders(env);
   const configuredPrimary = readRaw(env, "primary_model");
   const configuredFallbacks = parseModelList(readRaw(env, "fallback_models"), "fallback_models");
   let models;
@@ -318,6 +336,7 @@ function loadConfig(env = process.env) {
   const config2 = {
     openrouterApiKey,
     privacyMode,
+    strictProviders,
     models,
     maxChangedLines,
     maxInputTokens,
@@ -543,6 +562,9 @@ function buildProviderBlock(config2, mode) {
   if (config2.privacyMode === "strict") {
     provider["zdr"] = true;
     provider["data_collection"] = "deny";
+    if (config2.strictProviders.length > 0) {
+      provider["only"] = [...config2.strictProviders];
+    }
   }
   if (mode === "STRUCTURED") provider["require_parameters"] = true;
   return provider;
@@ -22569,13 +22591,43 @@ function safeFence(content) {
   }
   return "`".repeat(Math.max(3, longest + 1));
 }
+var SECRET_PATTERNS = [
+  // Vendor-prefixed keys: OpenAI, Anthropic, AWS access keys, GitHub, Slack,
+  // Stripe, Google, SendGrid, npm, Twilio, and the private-key header.
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+  /\bSG\.[A-Za-z0-9]{16,}\.[A-Za-z0-9]{16,}\b/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
+  // Credentials embedded in an assignment or connection string.
+  //
+  // The value must be a literal, so this cannot swallow the *correct* fix:
+  // `apiKey: process.env.API_KEY` is precisely what the reviewer should be
+  // suggesting, and redacting it turns the suggestion into noise. A dotted path,
+  // a call, or a bare identifier is a reference rather than a secret.
+  /(?:^|[^.\w])(?:password|passwd|secret|token|api[_-]?key)\s*[=:]\s*(?!process\.env)(?!os\.environ)(?!import\b)(?!require\b)[^\s"',;]{8,}/gi
+];
+function redactSecrets(text) {
+  let out = text;
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, (match) => {
+      const tail = match.slice(-4);
+      return `[redacted \u2026${tail}]`;
+    });
+  }
+  return out;
+}
 function neutraliseProse(text) {
-  return text.replace(/`/g, "\\`").replace(/([*_])/g, "\\$1").replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
+  return redactSecrets(text).replace(/`/g, "\\`").replace(/([*_])/g, "\\$1").replace(/<!--/g, "&lt;!--").replace(/-->/g, "--&gt;");
 }
 function renderQuote(quote) {
-  const truncated = quote.length > MAX_QUOTE_LENGTH3;
-  const body = truncated ? `${quote.slice(0, MAX_QUOTE_LENGTH3)}
-\u2026` : quote;
+  const redacted = redactSecrets(quote);
+  const truncated = redacted.length > MAX_QUOTE_LENGTH3;
+  const body = truncated ? `${redacted.slice(0, MAX_QUOTE_LENGTH3)}
+\u2026` : redacted;
   const lines = body.split("\n");
   const shown = lines.slice(0, MAX_QUOTE_LINES);
   const elided = lines.length - shown.length;
@@ -22587,9 +22639,10 @@ ${text}
 ${fence}`;
 }
 function renderSuggestion(suggestedCode) {
-  return `\`\`\`suggestion
-${suggestedCode}
-\`\`\``;
+  const safe = redactSecrets(suggestedCode);
+  return `${safeFence(safe)}suggestion
+${safe}
+${safeFence(safe)}`;
 }
 function renderComment(finding) {
   const parts = [];
@@ -22856,7 +22909,7 @@ function formatDiagnostic(d) {
   }
   return parts.join(" ");
 }
-var SECRET_PATTERNS = [
+var SECRET_PATTERNS2 = [
   // OpenAI / OpenRouter style
   /sk-[A-Za-z0-9_-]{16,}/g,
   // GitHub tokens
@@ -22870,9 +22923,9 @@ var SECRET_PATTERNS = [
   // GitLab
   /glpat-[A-Za-z0-9_-]{16,}/g
 ];
-function redactSecrets(value) {
+function redactSecrets2(value) {
   let out = value;
-  for (const pattern of SECRET_PATTERNS) {
+  for (const pattern of SECRET_PATTERNS2) {
     out = out.replace(pattern, "[REDACTED]");
   }
   return out;
@@ -22891,12 +22944,12 @@ function sanitize(fields) {
   const out = {};
   for (const [key, value] of Object.entries(fields)) {
     if (value === void 0) continue;
-    out[key] = redactSecrets(renderValue(value));
+    out[key] = redactSecrets2(renderValue(value));
   }
   return out;
 }
 function formatLine(level, message, fields) {
-  const safe = redactSecrets(message);
+  const safe = redactSecrets2(message);
   const extras = sanitize(fields);
   const rendered = Object.entries(extras).map(([k, v]) => `${k}=${v}`).join(" ");
   return rendered ? `${level} ${safe} ${rendered}` : `${level} ${safe}`;

@@ -282,6 +282,18 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
 export interface Config {
   readonly openrouterApiKey: string;
   readonly privacyMode: PrivacyMode;
+  /**
+   * Provider slugs to pin in strict mode. Empty means unconstrained.
+   *
+   * `zdr: true` constrains *how* a provider handles data but says nothing about
+   * *which* provider serves the request, and a provider can be attached to a
+   * model after we last checked it. The endpoint APIs that would enumerate
+   * providers are management-key only, and a management key cannot call the
+   * completions API — so runtime verification would need two secrets, one of
+   * which administers the account. Rejected. This allowlist is the only
+   * enforcement tightening available without one.
+   */
+  readonly strictProviders: readonly string[];
   readonly models: readonly ModelDefinition[];
   readonly maxChangedLines: number;
   readonly maxInputTokens: number;
@@ -374,6 +386,40 @@ function readPrivacyMode(env: NodeJS.ProcessEnv): PrivacyMode {
   throw new ConfigError("privacy_mode", `'${raw}' is not a valid mode. Use strict or relaxed.`);
 }
 
+/**
+ * Provider slugs to pin in strict mode (`provider.only`).
+ *
+ * Empty means unconstrained, which is the default: adding an allowlist requires
+ * the operator to know which providers actually serve the free tier, and an empty
+ * list that silently narrowed routing would turn most reviews into "no eligible
+ * provider" for no stated reason.
+ *
+ * Normalised and de-duplicated because a typo'd duplicate would otherwise widen
+ * nothing but would make the emitted block confusing to read in a request log.
+ */
+function readStrictProviders(env: NodeJS.ProcessEnv): readonly string[] {
+  const raw = readRaw(env, "strict_providers");
+  if (raw === undefined) return [];
+
+  const seen = new Set<string>();
+  for (const part of raw.split(",")) {
+    const slug = part.trim().toLowerCase();
+    if (slug.length === 0) continue;
+    if (!/^[a-z0-9][a-z0-9._-]*$/.test(slug)) {
+      // Sent verbatim to OpenRouter. A value with a comma or a quote could alter
+      // the routing block's meaning, so it is rejected rather than escaped.
+      throw new ConfigError(
+        "strict_providers",
+        `${JSON.stringify(slug)} is not a valid provider slug. Use OpenRouter's provider ` +
+          `slugs, comma-separated, e.g. "novita,fireworks".`,
+      );
+    }
+    seen.add(slug);
+  }
+
+  return [...seen];
+}
+
 function parseModelList(
   value: string | undefined,
   input: string,
@@ -432,6 +478,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   }
 
   const privacyMode = readPrivacyMode(env);
+  const strictProviders = readStrictProviders(env);
 
   const configuredPrimary = readRaw(env, "primary_model");
   const configuredFallbacks = parseModelList(readRaw(env, "fallback_models"), "fallback_models");
@@ -499,6 +546,7 @@ export function loadConfig(env: NodeJS.ProcessEnv = process.env): Config {
   const config: Config = {
     openrouterApiKey,
     privacyMode,
+    strictProviders,
     models,
     maxChangedLines,
     maxInputTokens,

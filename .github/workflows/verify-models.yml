@@ -1,0 +1,84 @@
+name: verify-models
+on:
+  schedule:
+    # 06:17 UTC daily. Off the hour on purpose: the top of the hour is when every
+    # other scheduled job on the platform runs, and a weekly check that queues
+    # behind them is a check that does not run on time.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+# Reports only. It must not be able to change anyone's CI: the free catalog is a
+# third party and a drifting one is not our outage.
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    container:
+      image: node:24
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .tool-versions
+
+      - run: npm ci --no-audit --no-fund
+
+      - name: Check every enabled model still exists, is free, and is reachable
+        id: probe
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: npm run verify-models
+
+      - name: Report
+        if: steps.probe.outputs.report != ''
+        run: |
+          {
+            echo "### Model catalog drift"
+            echo
+            echo '```'
+            echo '${{ steps.probe.outputs.report }}'
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open an issue when a default model has become unusable
+        if: steps.probe.outputs.breaking != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Deliberately not `fail`. A vanished free model must not turn every
+          # consumer's CI red — they have not changed anything and cannot fix it.
+          # The action handles a dead model by falling back, so the only thing
+          # worth interrupting a human for is the pool shrinking below the point
+          # where a fallback exists.
+          BODY=$(cat <<'EOF'
+          A default model in `src/config.ts` no longer meets its declared
+          capabilities. Consumers are not broken — the action falls back — but the
+          pool is smaller than the table in the README says.
+
+          ```
+          ${{ steps.probe.outputs.report }}
+          ```
+
+          ## What to check
+
+          - Does the model still appear at `GET /api/v1/models`?
+          - Does it still end `:free` and price at zero?
+          - Do its `supported_parameters` still include what the catalog claims?
+          - If its capability changed, `capabilityVerifiedOn` and `preferredMode`
+            in `src/config.ts` are now stale and must be re-measured, not just
+            re-dated.
+
+          Re-measure rather than re-date. `preferredMode` is a measured quality
+          choice, not a capability fact: `nemotron-3-super` serves every capability
+          mode and is much worse in the one the catalog would otherwise select.
+          EOF
+          )
+          echo "$BODY" | tr -d '\t' > /tmp/body.md
+          gh issue create \
+            --title "Free model catalog drift detected ($(date -u +%Y-%m-%d))" \
+            --body-file /tmp/body.md \
+            --label catalog-drift || echo "issue creation failed; see the run log"

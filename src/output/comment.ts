@@ -47,6 +47,69 @@ export function safeFence(content: string): string {
 }
 
 /**
+ * Redact credential-shaped substrings from text that will be published.
+ *
+ * ## Why this exists
+ *
+ * The seeded-secret test found this missing. A model reporting a hardcoded API key
+ * naturally quotes it back — "the value `sk-live-abc…` is committed to source" —
+ * and the review body, the step summary and the published comment all render that
+ * text verbatim. So a finding about a leaked credential **republished the
+ * credential** into the pull request, where it is now visible to everyone with read
+ * access and is committed to the branch history by the comment itself.
+ *
+ * That is strictly worse than saying nothing. The secret was already in the diff,
+ * but it was in one commit by one author; a bot comment copies it into a place
+ * people screenshot and paste into issue trackers.
+ *
+ * ## Why the whole comment is redacted and not just prose
+ *
+ * `suggestedCode` is rendered inside a `suggestion` block that GitHub will apply to
+ * the branch. A secret echoed there does not just appear — it gets written.
+ *
+ * ## Why these patterns
+ *
+ * Deliberately conservative and prefix-anchored. This runs on every review, so a
+ * loose pattern would redact ordinary prose ("skipped", "token-bucket") and make
+ * output unreadable. Each pattern requires a known vendor prefix *and* a length
+ * that a real credential has, which is what keeps the false-positive rate near
+ * zero. A secret with an unrecognised shape is not redacted — the limitation is
+ * recorded in SECURITY.md rather than papered over with a greedy regex.
+ */
+const SECRET_PATTERNS: readonly RegExp[] = [
+  // Vendor-prefixed keys: OpenAI, Anthropic, AWS access keys, GitHub, Slack,
+  // Stripe, Google, SendGrid, npm, Twilio, and the private-key header.
+  /\b(?:sk|pk|rk)-[A-Za-z0-9_-]{16,}\b/g,
+  /\bAKIA[0-9A-Z]{16}\b/g,
+  /\bgh[pousr]_[A-Za-z0-9]{20,}\b/g,
+  /\bxox[baprs]-[A-Za-z0-9-]{10,}\b/g,
+  /\bAIza[0-9A-Za-z_-]{30,}\b/g,
+  /\bSG\.[A-Za-z0-9]{16,}\.[A-Za-z0-9]{16,}\b/g,
+  /\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\b/g,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
+  // Credentials embedded in an assignment or connection string.
+  //
+  // The value must be a literal, so this cannot swallow the *correct* fix:
+  // `apiKey: process.env.API_KEY` is precisely what the reviewer should be
+  // suggesting, and redacting it turns the suggestion into noise. A dotted path,
+  // a call, or a bare identifier is a reference rather than a secret.
+  /(?:^|[^.\w])(?:password|passwd|secret|token|api[_-]?key)\s*[=:]\s*(?!process\.env)(?!os\.environ)(?!import\b)(?!require\b)[^\s"',;]{8,}/gi,
+];
+
+export function redactSecrets(text: string): string {
+  let out = text;
+  for (const pattern of SECRET_PATTERNS) {
+    out = out.replace(pattern, (match) => {
+      // Keep a short recognisable tail so the reader can still correlate the
+      // finding with the line. Enough to locate, not enough to use.
+      const tail = match.slice(-4);
+      return `[redacted …${tail}]`;
+    });
+  }
+  return out;
+}
+
+/**
  * Neutralise markdown structure in untrusted prose.
  *
  * Inline code spans and emphasis are the two constructs that let untrusted text
@@ -56,9 +119,12 @@ export function safeFence(content: string): string {
  * Deliberately not escaped: pipes outside a table, and newlines, because the
  * explanation is already placed in a context where those are inert. Escaping
  * more than necessary makes the output harder to read for no security gain.
+ *
+ * Redaction runs first: a redacted marker contains no markdown-significant
+ * characters, so the two compose without either interfering with the other.
  */
 function neutraliseProse(text: string): string {
-  return text
+  return redactSecrets(text)
     // Backticks would open a code span and could swallow surrounding structure.
     .replace(/`/g, "\\`")
     // Asterisks and underscores would open emphasis.
@@ -76,9 +142,21 @@ function neutraliseProse(text: string): string {
  * an over-long quote is almost always the model quoting a whole function, which
  * anchors ambiguously and would have been rejected upstream.
  */
+/**
+ * Render the quoted source text a finding refers to.
+ *
+ * Redacted. This is the largest verbatim block FreeReview publishes, it comes
+ * straight from the diff, and a finding about a hardcoded credential quotes the
+ * credential. The seeded-secret test found it emitted unredacted while the
+ * surrounding prose was being redacted — the leak was here, not in the prose.
+ *
+ * The fence is chosen from the *redacted* text, so a marker can never shorten the
+ * fence below the content it wraps.
+ */
 export function renderQuote(quote: string): string {
-  const truncated = quote.length > MAX_QUOTE_LENGTH;
-  const body = truncated ? `${quote.slice(0, MAX_QUOTE_LENGTH)}\n…` : quote;
+  const redacted = redactSecrets(quote);
+  const truncated = redacted.length > MAX_QUOTE_LENGTH;
+  const body = truncated ? `${redacted.slice(0, MAX_QUOTE_LENGTH)}\n…` : redacted;
 
   const lines = body.split("\n");
   const shown = lines.slice(0, MAX_QUOTE_LINES);
@@ -100,8 +178,18 @@ export function renderQuote(quote: string): string {
  * This is the one place in the renderer that cannot defend itself, which is why
  * the check lives upstream.
  */
+/**
+ * Render a GitHub suggestion block.
+ *
+ * Redacted, not just neutralised. A suggestion is *applied* to the branch when a
+ * reviewer accepts it, so a secret echoed into this block does not merely appear in
+ * a comment — it is written into the repository. Fence length is computed from the
+ * redacted text so a redacted marker can never shorten the fence below the content
+ * it wraps.
+ */
 function renderSuggestion(suggestedCode: string): string {
-  return `\`\`\`suggestion\n${suggestedCode}\n\`\`\``;
+  const safe = redactSecrets(suggestedCode);
+  return `${safeFence(safe)}suggestion\n${safe}\n${safeFence(safe)}`;
 }
 
 /**
