@@ -42,6 +42,10 @@ jobs:
           # checkout's credential helper here — "Duplicate header: Authorization" —
           # and fixing that would have meant accepting the dependency anyway.
           BRANCH="freereview-consumer-smoke"
+          # Checkout ran with persist-credentials:false so it would not inject an
+          # extraheader that duplicates the one `gh` sets. That leaves git with no
+          # credential, so `gh` has to configure the helper for the push.
+          gh auth setup-git
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
