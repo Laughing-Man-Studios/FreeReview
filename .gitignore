@@ -13,3 +13,4 @@ eval/runs/
 coverage/
 eval/results/
 eval/.cache/
+.evalout/
