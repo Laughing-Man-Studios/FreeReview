@@ -32,23 +32,51 @@ jobs:
 
       - name: Open a pull request that exercises the action
         id: pr
-        uses: peter-evans/create-pull-request@v6
-        with:
-          branch: freereview-consumer-smoke
-          title: "chore: exercise FreeReview ${{ inputs.ref }} on a clean consumer repo"
-          body: |
-            Automated consumer smoke test. Installs the published action ref and
-            opens a pull request so the action runs against a diff this repository
-            did not author.
-          commit-message: "chore: consumer smoke test"
-          add-paths: .github/workflows/consumer-smoke-probe.yml
-          delete-branch: true
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ inputs.ref }}
+        run: |
+          # Uses the runner's preinstalled `gh` rather than a third-party action, for
+          # the same reason release.yml does: it keeps the supply chain for the
+          # release path empty. peter-evans/create-pull-request also conflicts with
+          # checkout's credential helper here — "Duplicate header: Authorization" —
+          # and fixing that would have meant accepting the dependency anyway.
+          BRANCH="freereview-consumer-smoke"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          git checkout -B "$BRANCH"
+          git commit --allow-empty -m "test: exercise FreeReview@$REF on a clean diff"
+
+          PUSHED=0
+          if git push --force origin "$BRANCH" 2>/dev/null; then PUSHED=1; fi
+          # The branch may already exist from a previous run, in which case a PR may
+          # already be open against it.
+          if [ "$PUSHED" = "0" ]; then
+            EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
+            if [ -n "$EXISTING" ]; then
+              echo "Reusing pull request #$EXISTING from a previous run."
+              echo "number=$EXISTING" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "::error::could not push the probe branch and no open pull request exists"
+            exit 1
+          fi
+
+          git checkout main 2>/dev/null || git checkout master
+
+          PR_NUMBER=$(gh pr create \
+            --head "$BRANCH" \
+            --title "test: exercise FreeReview@$REF on a clean diff" \
+            --body "Automated consumer smoke test. Installs the published action ref and opens a pull request so the action runs against a diff this repository did not author.\n\nThe probe workflow is pinned to \`$REF\`." \
+            | grep -oE '[0-9]+$')
+          echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
 
       - name: Wait for the review to appear
         id: wait
         uses: actions/github-script@v7
         env:
-          PR_NUMBER: ${{ steps.pr.outputs.pull-request-number }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
         with:
           script: |
             const deadline = Date.now() + 8 * 60 * 1000;
