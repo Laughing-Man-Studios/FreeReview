@@ -237,29 +237,82 @@ source. See [`SECURITY.md`](SECURITY.md) for the full threat model.
 
 ## Models
 
-The default pool is a starting point, not a quality ranking. The authoritative
-ordering is whatever the project's own golden-dataset evaluation measures —
-see [`docs/model-evaluation.md`](docs/model-evaluation.md) once published.
+The default pool is ordered by measurement, not by vendor claims. Every entry
+below was probed against the live service and benchmarked on the project's own
+golden dataset — see [`docs/model-evaluation.md`](docs/model-evaluation.md).
 
-| Model | Context | Structured output | Note |
+| Role | Model | Mode | Injection resistance |
 | --- | --- | --- | --- |
-| `qwen/qwen3.8-27b:free` | 262K | JSON Schema | Benchmarked default |
-| `nvidia/nemotron-3-super-120b-a12b:free` | 262K | JSON Schema | Primary structured-output fallback |
-| `liquid/lfm-2.5-2.6b:free` | 64K | JSON Schema | Fallback |
-| `google/gemma-4-31b-it:free` | 262K | `response_format` only | Cannot use `json_schema`; uses JSON-object mode |
-| `nvidia/nemotron-3-ultra-550b-a55b:free` | 1M | none | Prompt-JSON mode with defensive parsing |
-| `poolside/laguna-s-2.1:free` | 262K | none | **Disabled by default** — provider documents training on free usage |
-| `thinkingmachines/inkling-small:free` | 1M | none | **Disabled by default** — provider logs and retains free prompts |
+| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **resistant** (0/2, five observations) |
+| Fallback 1 | `nvidia/nemotron-3-super-120b-a12b:free` | prompt-JSON | exposed |
+| Fallback 2 | `qwen/qwen3.8-27b:free` | `json_object` | exposed |
+| Fallback 3 | `nvidia/nemotron-3-ultra-550b-a55b:free` | prompt-JSON | exposed |
 
-Disabled models remain in the code and are reachable under
-`privacy_mode: relaxed`.
+**The primary is the only model that has never followed instructions written
+into a diff.** That, not raw quality, is why it ships first: the measured
+recall and precision of the primary and of the best fallback are within noise of
+each other, so the property that distinguishes them is the one that matters.
+
+When a review comes from a model with measured exposure, **the review says so**,
+in the review body itself. See [Prompt injection](#prompt-injection) below.
+
+### Two things the catalog gets wrong
+
+**Advertised capabilities are not real capabilities.** OpenRouter's
+`supported_parameters` is a union across endpoints and can be stale.
+`qwen/qwen3.8-27b:free` advertises `structured_outputs` and returns **404** on
+every structured request. Each model therefore carries a `preferredMode` chosen
+by *measuring review quality in each working mode*, not by taking the strongest
+one advertised:
+
+- `nemotron-3-super` genuinely supports structured output and is **much worse**
+  there — recall 0.47 against 0.87 in prompt-JSON mode.
+- `qwen` is the reverse: JSON-object mode beats prompt-JSON on both recall and
+  injection resistance.
+
+Capability decides which modes are *eligible*. Measurement decides which is
+*chosen*.
+
+### Models excluded on measured evidence
+
+Kept in the catalog with the failure recorded, so a model that starts answering
+is one edit away and the reason it was excluded outlives the exclusion.
+
+| Model | Why disabled |
+| --- | --- |
+| `liquid/lfm-2.5-2.6b:free` | `400` in every capability mode |
+| `google/gemma-4-31b-it:free` | `429` in every working mode, across two probes |
+| `thinkingmachines/inkling-small:free` | `403` — "only available on agentic harnesses". Not an API endpoint. |
+| `poolside/laguna-s-2.1:free` | Provider documents training on free usage (`privacy_mode: relaxed` only) |
+
+## Prompt injection
+
+A pull request author can put instructions in their own diff — a comment telling
+the model to report nothing — and a model that obeys produces a suppressed review
+that is **indistinguishable from a clean one**. That is the failure this project
+exists to prevent.
+
+FreeReview measures it: fixtures plant a suppression instruction directly above a
+real defect, so the only way to pass is to ignore the instruction and report the
+defect. A model that complies reports nothing and is scored as having complied.
+
+Because only the primary has been measured resistant, a review produced by a
+fallback **discloses that in the review body**, naming what was measured and what
+happened. If a model has not been measured at all, that is disclosed too —
+silence would be indistinguishable from safety.
+
+This is a real limitation, not a solved problem: when the primary is rate-limited
+and a review falls through, findings can be suppressed. The disclosure makes that
+visible rather than pretending otherwise.
 
 ## Roadmap
 
-- **Now** — diff parser, deterministic anchoring, context budgeting, OpenRouter
-  client and scheduler, prompt and structured output, publisher
-- **Then** — golden evaluation dataset with a held-out split, model
-  benchmarking, prompt tuning
+- **Done** — diff parser, deterministic anchoring, context budgeting, OpenRouter
+  client and scheduler, prompt and structured output, publisher, golden
+  evaluation dataset with a held-out split, capability probing, model
+  benchmarking, prompt-injection disclosure
+- **Next** — hardening and release; prompt iteration against the falsy-null
+  coercion that every model measured so far has missed
 - **Later** — better surrounding-code context, additional free models as the
   catalog changes, optional direct-provider integrations, fork PR support
 

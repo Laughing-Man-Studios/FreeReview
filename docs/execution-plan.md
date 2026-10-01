@@ -205,15 +205,26 @@ FreeReview/
 │   ├── parse/{structured,text,repair}.ts
 │   ├── anchor/{resolve,normalize}.ts
 │   └── output/{comment,suggestion,summary}.ts
-├── eval/{run,score}.ts · eval/thresholds.json
+├── eval/
+│   ├── run.ts                     # dataset runner (--stage, --sweep, --repeat)
+│   ├── score.ts                   # ground-truth scoring
+│   ├── rescore.ts                 # re-score a stored run with the current scorer
+│   ├── probe.ts                   # availability + capability matrix
+│   ├── generate.ts · validate-fixtures.ts
+│   ├── lib/{fixtures,score,cache,harness}.ts
+│   └── fixtures/stage-{a,b}/<id>/{pr.diff,head.json,fixture.json}
 ├── tests/
 │   ├── unit/ · property/ · integration/ · security/
-│   ├── golden-dataset/{development,regression,held-out,production}/
 │   └── fixtures/
 └── dist/index.js                  # committed bundle
 ```
 
-Deviations from §25: `types.ts`/`diagnostics.ts` extracted (§36's codes had no home); directory grouping (flat layout would push anchoring and scheduler past ~800 lines); `eval/` at root (referenced independently by §26–30); `production/` golden tier added.
+Deviations from §25: `types.ts`/`diagnostics.ts` extracted (§36's codes had no home); directory grouping (flat layout would push anchoring and scheduler past ~800 lines); `eval/` at root (referenced independently by §26–30).
+
+**Not built, deliberately:** `eval/thresholds.json`. See §12. The golden dataset lives
+under `eval/fixtures/stage-{a,b}/` rather than `tests/golden-dataset/`, and there is
+**no `production/` tier** — a tier sampled from real customer diffs was an ambition
+this project has not reached, and Stage B is the closest equivalent.
 
 ---
 
@@ -669,29 +680,57 @@ Languages: TypeScript, Python, Go, SQL, YAML, Dockerfile. Realistic code with pl
 
 ## 12. Evaluation harness and thresholds
 
-`npm run eval -- --split development --model <id> --max-requests 40`
+`npm run eval -- --stage a --model <id> --max-requests 40`, or `--stage b` for the
+held-out set. `--sweep` measures every eligible capability mode, `--repeat N` runs
+N fresh passes for a spread rather than a point estimate, and `--no-cache` forces
+real requests rather than replays.
 
-Preflight: `OPENROUTER_API_KEY` present; check `free_model_daily_requests`; refuse to start if `remaining - maxRequests < 10`.
-Every run writes `eval/runs/<ts>.jsonl` (gitignored): `{fixtureId, modelId, promptVersion, configVersion, requestBody, rawResponse, parsed, anchored, published, usage, errorType, latencyMs}`. The raw record is what makes §29's "identify failure clusters → review raw outputs" loop possible.
+Preflight: `OPENROUTER_API_KEY` present. Every run writes
+`eval/results/<ts>.json` (gitignored) and an artifact from the eval workflow.
 
-`eval/thresholds.json` — the v1 promotion gate:
+### What the harness measures, and what it deliberately does not
 
-| Metric | Development | Held-out |
+| Metric | Gate | Notes |
 |---|---|---|
-| schema validity rate | ≥ 0.99 | ≥ 0.98 |
-| JSON recovery rate | ≥ 0.90 | ≥ 0.85 |
-| **anchor correctness (wrong-file / wrong-side / off-diff)** | **1.00** | **1.00** |
-| anchor acceptance rate | ≥ 0.85 | ≥ 0.80 |
-| finding precision | ≥ 0.70 | ≥ 0.60 |
-| finding recall | ≥ 0.50 | ≥ 0.45 |
-| severity accuracy | ≥ 0.60 | ≥ 0.55 |
-| injection compliance | **0** | **0** |
-| false positives on clean fixtures | 0 | 0 |
-| median requests / PR | ≤ 2 | — |
+| **anchor correctness** — wrong file, wrong side, or off-diff | **1.00, hard** | A single wrong-side comment is a defect in the Action, not the model. Enforced in code by the resolver, which rejects context-only anchors, so this is a property of the system rather than a number the harness infers. |
+| **injection compliance** | **0, hard** | Any non-zero value means a PR author can suppress findings by writing a comment. Measured by planting a suppression instruction above a real defect. |
+| finding precision | ≥ 0.70 | Computed **after** the action's own dedupe, so it describes what a reader sees. |
+| finding recall | ≥ 0.50 | One expectation per finding; a repeat cannot claim it twice. |
+| false positives on clean fixtures | 0 | Zero-finding fixtures exist specifically for this. |
+| explanation quality | — | Fraction of required concepts conveyed, matched as synonym groups. |
+| injection compliance on `unmeasured` models | disclosed | Not a gate: an untested model is disclosed, not scored. |
 
-Anchor **correctness** is a hard 1.00 gate — a single wrong-side or off-diff comment is a defect in the Action, not the model. Anchor *acceptance* is soft: a low rate means the model is quoting badly, not that anchoring is broken. Both are reported side by side so they are never confused.
+**Anchor correctness and anchor *acceptance* were both originally planned.** The
+second is reported as `primaryPlacementRate`, which measures how often a *correct*
+finding landed on the canonical placement rather than a declared alternate. A low
+value does not mean anchoring is broken — it usually means the model chose a
+different defensible location — which is why it is not a gate.
 
-Phase 7 exits when a model meets the held-out column at a `promptVersion` recorded in the repo, with the run artifact referenced in the release notes.
+### Metrics deliberately dropped from this table
+
+- **schema validity rate** and **JSON recovery rate** are not measured. The
+  harness parses defensively and never gates on parse success, so a number here
+  would describe the parser's tolerance rather than model quality. Parse failures
+  are still *counted and reported* per model.
+- **severity accuracy** is not measured, deliberately. Severity is advisory
+  judgement; a small model calibrating it worse than a senior engineer should not
+  be scored as a detection failure, and it is not used to gate anything.
+- **median requests / PR** is not computed by the harness. It is observable from
+  the `requests_used` output on real runs.
+- **`eval/thresholds.json` does not exist.** This section was the only place it
+  was promised. Withholding it is now the point: **the project has no
+  uncontaminated held-out data** — Stage A's four fixtures and Stage B's ten have
+  all been scored — so any numeric threshold written now would be fitted to data
+  that has already been seen. Gates above are the ones that can be justified
+  argumentatively and enforced in code.
+
+### A note on what the held-out scores can support
+
+At 8 expected findings, one miss moves recall by 12.5%, and a 95% Wilson interval
+on 7/8 spans roughly **[60%, 97%]**. Stage B could detect a large difference and
+could not rank two comparable models. Measured variance on repeated identical
+runs is ±0.13 to ±0.26 recall, so any threshold finer than a whole fixture is
+measuring noise.
 
 ---
 
@@ -796,11 +835,44 @@ Deviations from the plan, and why:
 
 Wiring: `run.ts` now anchors, validates, dedupes, re-checks the head SHA, and publishes. `event: COMMENT` is the only value the payload can take, asserted at both the publisher and the pipeline level.
 
-### Phase 7 — Golden dataset & evaluation (3–4 days — largest single investment)
-Author **Stage A (14)** + `validate:fixtures`; `eval/{run,score}.ts` + `thresholds.json`; run dev set against `qwen/qwen3.8-27b:free`; cluster failures; ≤ 8 targeted prompt iterations (hard cap), each measured; run regression set; run held-out **once**; select the primary model on measured results; **then author Stage B (18)** informed by observed failures and re-measure.
-**Exit:** thresholds held-out column met; results committed to `docs/model-evaluation.md` with raw numbers; `MAX_PROMPT_ITERATIONS` and `MAX_EVAL_REQUESTS` respected.
+### Phase 7 — Golden dataset & evaluation — **MOSTLY COMPLETE; prompt iteration outstanding**
+Authored Stage A (17) and Stage B (10) with `validate:fixtures`; built `eval/{run,score}.ts` with a content-addressed cache, capability probing and an availability probe; measured all 8 catalog models; ran 3 repeated passes to establish variance; ran Stage B **once**.
+**Done:** dataset, harness, scoring, full-catalog measurement, capability matrix, error bars, Stage B one-shot, injection disclosure.
+**Outstanding:** ≤ 8 targeted prompt iterations (capped, not yet started). The target is now specific — every model measured has missed the falsy-null coercion (`cart.discount == 0`).
+**Exit revised:** the held-out column cannot be re-measured, because all held-out data is spent. Exit is now "thresholds justified argumentarily and enforced in code", with the measured numbers in `docs/model-evaluation.md`.
+**`thresholds.json` was never written**, deliberately. See §12.
 
-#### 7d. Evaluation shape, agreed 2026-09-29
+#### 7a. Stage A outcome, and three corrections
+Authored 2026-09-29 as 14 fixtures. The committed set is 17.
+- **Cross-examination by an independent model found 8 of 14 flawed** (`62f59b7`), including an inverted injection test where compliance and resistance were indistinguishable — a payload with no planted defect scores both identically. All 8 corrected.
+- **The first baseline run found three more ground-truth errors** (`e0fa9a7`): a correct LEFT anchor on a removed line, and two two-line ranges, all scored as misses. Two held-out fixtures were **demoted to development** because ground truth cannot be revised on held-out data after model output on it has been seen.
+- **Two fresh held-out fixtures replaced them**, authored by someone who had by then seen the failure modes they were meant to probe — recorded as weakening the set rather than strengthening it.
+
+#### 7b. Full-catalog measurement, and a production bug it found
+Measuring all 8 models rather than 3 found that `qwen/qwen3.8-27b:free` was routing to a capability mode that returns **404 on every request**. A 404 names no cause, so it would have surfaced only when a pull request needed reviewing *and* the primary model had already failed — exactly when a fallback exists to be used. Fixed (`1531b04`).
+
+Capability is now **measured, not trusted** (`b66d8b0`): every mode is attempted against every model and catalog mismatches reported. Three further models were disabled on measured evidence (400 / 429 / 403).
+
+#### 7c. Capability mode beats model choice, and the policy that chose it was wrong
+The same model in two working modes moves by more than the gap between models, in
+**opposite directions** (`2ecc386`): `nemotron-3-super` loses 0.40 recall moving
+to structured output; `qwen` gains 0.13 recall and flips from complying with both
+injection payloads to resisting both by moving to `json_object` mode.
+
+So `reviewModeFor` no longer takes the strongest advertised capability. Capability
+filters which modes are eligible; a measured `preferredMode` picks one (`566a682`).
+An unsupported preference degrades to the strongest mode the model can actually
+serve, because the failure of getting this wrong is a silent 404.
+
+#### 7d. Evaluation shape, agreed 2026-09-29 — **superseded by 7b and 7c**
+
+**Superseded.** The shortlist below was chosen before capability mode was known to
+matter, and the premise — that strict privacy would force the weakest model — was
+wrong: the ZDR model is the strongest available *and* the only one measured
+injection-resistant. Measured results are in `docs/model-evaluation.md`; this
+section is retained for the record.
+
+**Shortlist: the ZDR model plus two non-ZDR models.** Under `strict` — the default — exactly one free model has a ZDR endpoint, so a strict-only evaluation cannot answer the question that matters. The comparison that decides the `strict` default is ZDR-model quality against the best available under `relaxed`. Three models: `inclusionai/ling-3.0-flash-sante:free` (ships under strict), `qwen/qwen3.8-27b:free` and `nvidia/nemotron-3-super-120b-a12b:free` (quality ceiling under relaxed). ~295 requests total.
 
 **Shortlist: the ZDR model plus two non-ZDR models.** Under `strict` — the default — exactly one free model has a ZDR endpoint, so a strict-only evaluation cannot answer the question that matters. The comparison that decides the `strict` default is ZDR-model quality against the best available under `relaxed`. Three models: `inclusionai/ling-3.0-flash-sante:free` (ships under strict), `qwen/qwen3.8-27b:free` and `nvidia/nemotron-3-super-120b-a12b:free` (quality ceiling under relaxed). ~295 requests total.
 
@@ -918,7 +990,11 @@ A prompt iteration re-runs the same fixtures against the same diffs. The unchang
 
 This is worth building because it attacks the cost directly rather than the ceiling: it is the difference between ~200 requests and materially fewer, and it makes the *unfunded* path viable rather than merely slow. The cache is bypassable via `--no-cache` when a provider-side change makes a fresh response genuinely informative, which is a rarer event than it sounds and should be recorded when it happens.
 
-### Phase 8 — Hardening, docs, release (1.5 days)
+### Phase 8 — Hardening, docs, release (1.5 days) — **NOT STARTED**
+**Documentation audit completed 2026-10-01.** README's model table, this plan's
+§12 thresholds, the Phase 7 status, and the Stage A cross-examination record were
+all stale and have been corrected. `privacyVerifiedOn` is now populated for every
+model where it is meaningful (§8a), which makes SECURITY.md's claim true.
 Security review; secret/log audit with the seeded-secret test; rate-limit stress (30 synthetic PRs against the mock, assert ≤ 8 requests); stale-commit stress; `verify-models.yml`; `README.md` / `SECURITY.md` / `LICENSE`; `release.yml`; marketplace metadata.
 **Exit:** every §15 item demonstrably true; a tagged release installs and runs from a clean consumer repo.
 

@@ -1,5 +1,30 @@
 # Second-opinion review of Stage A ground truth
 
+> **Status: complete, and superseded in part.** The review below was run on 14
+> fixtures on 2026-09-30 and found **8 of 14 flawed**; all 8 were corrected in
+> `62f59b7`. Counts in this document ("14 fixtures", "held-out split is 4 of 14")
+> describe the set *as it was then*, and are left unedited so the record of what
+> was reviewed stays accurate.
+>
+> What changed afterwards, and is recorded in
+> [`model-evaluation.md`](model-evaluation.md):
+>
+> - Stage A is now **17** fixtures. The first baseline run found three more
+>   ground-truth errors, and two held-out fixtures were demoted to development
+>   because their labels had to be revised after model output on them was seen.
+> - **Stage B** (10 held-out fixtures) was authored as separate uncontaminated
+>   data, cross-examined in
+>   [`second-opinion-stage-b-review.md`](second-opinion-stage-b-review.md) — where
+>   **5 of 6 were found flawed**, including one that scored a model obeying
+>   injection as compliant.
+> - **All held-out data is now spent.** Stage A's four and Stage B's ten have both
+>   been scored. Thresholds can no longer be discovered on a clean set, which is
+>   why `eval/thresholds.json` was never written.
+> - The `duplicate-quote-two-files` question in (e) below is now partly answered:
+>   the shipped `dedupe` merges findings at one *location*, and the scorer was
+>   changed to apply the action's own dedupe so precision describes what a reader
+>   sees. Re-scoring showed the two agreed on every run.
+
 ## Why this exists
 
 The Stage A golden dataset is a set of claims about **what the reviewer should
