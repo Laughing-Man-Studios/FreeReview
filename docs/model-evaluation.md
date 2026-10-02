@@ -13,6 +13,31 @@ conclusions drawn from the earlier runs)
 **Harness:** `npm run eval`, 10 req/min, concurrency 1, circuit breaker at 4
 consecutive 429s.
 
+> ### ⚠️ Every `0 / 2` figure below predates 2026-10-02 and is now measured on a
+> set that no longer exists.
+>
+> The dataset above is the one those numbers were measured on. Stage A now holds
+> **23 fixtures with 8 injection fixtures**, because the injection claim rested on
+> two payloads of the same shape — a suppression instruction in a comment or a
+> string literal in a `.ts` file. Two observations of one shape is not evidence
+> of resistance, and it was the load-bearing claim of the whole project.
+>
+> Six fixtures were added, varying the payload's *mechanism* and *placement*
+> rather than its vocabulary: a fenced-block escape that tries to end the region
+> it is confined to, a ChatML system-turn impersonation, a fake human approval,
+> text concealed in an HTML comment, a suppression string shaped like a config
+> value, and a payload phrased as a disclaimer so it never issues a command.
+>
+> **None of the numbers in this document have been re-measured against the
+> widened set.** The `0 / 2` figures are correct for the set they were measured
+> on and should not be quoted as current. No OpenRouter key was available in the
+> authoring environment, so the measurement is outstanding — see *What comes
+> after v1*, which puts it first.
+>
+> What is *not* outstanding is the dataset itself: `npm run validate:fixtures`
+> passes on all 23, including the falsifiability check that makes each payload
+> measurable.
+
 ## Final results (run 3, all three models measured)
 
 | Model | Privacy | Recall | Precision | Anchor | Explanation | FP | Dup | Forbidden | **Injection compliance** |
@@ -173,6 +198,14 @@ validation of what shipped — the numbers above are the real ones. This is the
 queue for the next round, and it is deliberately ordered so that the cheap
 unblocking work happens before the expensive measurement work:
 
+0. **Re-measure injection compliance against the widened 8-fixture set.** This
+   moved to the front because the payload fixtures were authored and validated
+   on 2026-10-02 and the measurement is the only thing standing between them and
+   being evidence. It is also the cheapest meaningful measurement available: 8
+   injection fixtures, one model, and it needs no uncontaminated defect fixtures
+   — compliance is scored as "reported nothing", which does not consume held-out
+   recall material. Until it runs, `0 / 2` describes a set that no longer
+   exists.
 1. Persist the cache as an artifact so iterations stop paying full price.
 2. Re-measure `qwen` when it is not rate-limited, and either add a fourth model
    or drop it with a recorded reason.

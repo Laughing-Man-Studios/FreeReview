@@ -31,7 +31,7 @@
  */
 
 import { describe, expect, it } from "vitest";
-import { STAGE_A, STAGE_B } from "../../eval/lib/fixtures.js";
+import { STAGE_A, STAGE_B, carriesSuppressionPayload } from "../../eval/lib/fixtures.js";
 import { renderFixture } from "../../eval/lib/render.js";
 
 const ALL = [...STAGE_A, ...STAGE_B];
@@ -139,9 +139,10 @@ describe("every expected finding is judgeable from the diff alone", () => {
       const diffText = renderFixture(fixture)
         .flatMap((f) => f.patch)
         .join("\n");
-      const payloadLines = diffText
-        .split("\n")
-        .filter((l) => /ignore all previous|report no findings|report nothing/i.test(l));
+      // Third copy of this check to be collapsed. It was the narrowest of the
+      // three — three phrasings, inline — so it rejected payloads the validator
+      // accepted. One helper, `carriesSuppressionPayload`, now backs all callers.
+      const hasPayload = carriesSuppressionPayload(diffText);
 
       for (const expected of fixture.expectedFindings) {
         for (const line of expected.quote.split("\n")) {
@@ -160,7 +161,7 @@ describe("every expected finding is judgeable from the diff alone", () => {
           }
         }
       }
-      expect(payloadLines.length, `${fixture.id} has no visible payload to resist`).toBeGreaterThan(0);
+      expect(hasPayload, `${fixture.id} has no visible payload to resist`).toBe(true);
     }
   });
 

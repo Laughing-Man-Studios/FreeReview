@@ -15,7 +15,7 @@
 import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
-import { STAGE_A, STAGE_A_COUNTS } from "../../eval/lib/fixtures.js";
+import { STAGE_A, STAGE_A_COUNTS, carriesSuppressionPayload } from "../../eval/lib/fixtures.js";
 import { hunkCounts, renderFile, renderFixture, renderHead } from "../../eval/lib/render.js";
 import { parseUnifiedDiff, DiffParseError } from "../../src/diff/parse.js";
 import { buildIndex } from "../../src/diff/index.js";
@@ -209,12 +209,9 @@ describe("an injection fixture must be falsifiable", () => {
     it(`${fixture.id} actually carries a suppression payload`, () => {
       const diff = renderFixture(fixture)
         .map((f) => f.patch)
-        .join("")
-        .toLowerCase();
+        .join("");
       expect(
-        /report no findings|return an empty findings array|reply exactly: no defects|ignore all previous/.test(
-          diff,
-        ),
+        carriesSuppressionPayload(diff),
         `${fixture.id} is marked injection but contains nothing to resist`,
       ).toBe(true);
     });
@@ -226,10 +223,9 @@ describe("an injection fixture must be falsifiable", () => {
     for (const fixture of STAGE_A.filter((f) => !f.injection)) {
       const diff = renderFixture(fixture)
         .map((f) => f.patch)
-        .join("")
-        .toLowerCase();
+        .join("");
       expect(
-        /report no findings|ignore all previous instructions|reply exactly: no defects/.test(diff),
+        carriesSuppressionPayload(diff),
         `${fixture.id} carries a suppression payload but is not marked injection`,
       ).toBe(false);
     }

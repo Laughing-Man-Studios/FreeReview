@@ -38,7 +38,8 @@ import { join } from "node:path";
 import { parseUnifiedDiff, DiffParseError } from "../src/diff/parse.js";
 import { buildIndex } from "../src/diff/index.js";
 import { resolveAnchor } from "../src/anchor/resolve.js";
-import { STAGE_A, STAGE_A_COUNTS, STAGE_B } from "./lib/fixtures.js";
+import { classifyPath } from "../src/pipeline/filter.js";
+import { STAGE_A, STAGE_A_COUNTS, STAGE_B, carriesSuppressionPayload } from "./lib/fixtures.js";
 import { hunkCounts, renderFile, renderFixture, renderHead, renderFixtureJson } from "./lib/render.js";
 
 const BASE = join(import.meta.dirname, "fixtures");
@@ -147,13 +148,37 @@ for (const { fixture, root } of ALL_FIXTURES) {
 
   // Every hunk line carries a valid marker and the header matches the body.
   for (const file of fixture.files) {
+    // A fixture whose file the pipeline would filter out measures nothing: the
+    // payload never reaches the model, the defect never gets looked for, and the
+    // result is scored as though the reviewer had seen it. Nothing else in this
+    // file can catch that, because the diff is valid — it is simply never sent.
+    const kind = classifyPath(file.path);
+    if (kind !== "source") {
+      fail(
+        where,
+        `${file.path} classifies as '${kind}', so the pipeline filters it and this fixture ` +
+          "cannot measure anything — put the payload in a file that is actually reviewed",
+      );
+    }
     try {
       const { oldCount, newCount, added, deleted } = hunkCounts(file.lines);
-      if (oldCount === 0) {
-        fail(where, `${file.path}: hunk has no old-side lines, so nothing can be anchored LEFT`);
+      // An added file has no old side and a deleted one has no new side — that
+      // is what those statuses mean, not a defect. Requiring both sides made
+      // `status: "added"` unusable, and the first fixture to use it (a payload
+      // hidden in a new markdown file) failed validation for being correct.
+      const expectOld = file.status !== "added";
+      const expectNew = file.status !== "deleted";
+      if (expectOld && oldCount === 0) {
+        fail(where, `${file.path}: ${file.status} hunk has no old-side lines, so nothing can be anchored LEFT`);
       }
-      if (newCount === 0) {
-        fail(where, `${file.path}: hunk has no new-side lines, so nothing can be anchored RIGHT`);
+      if (expectNew && newCount === 0) {
+        fail(where, `${file.path}: ${file.status} hunk has no new-side lines, so nothing can be anchored RIGHT`);
+      }
+      if (!expectOld && oldCount > 0) {
+        fail(where, `${file.path}: an added file cannot have old-side lines`);
+      }
+      if (!expectNew && newCount > 0) {
+        fail(where, `${file.path}: a deleted file cannot have new-side lines`);
       }
       if (added === 0 && deleted === 0) {
         fail(where, `${file.path}: hunk contains no change, so the fixture tests nothing`);
@@ -296,15 +321,14 @@ for (const { fixture, root } of ALL_FIXTURES) {
       );
     }
 
-    // And the payload must actually be asking for suppression.
+    // And the payload must actually be asking for suppression. The phrase list and
+    // the reasoning behind it live in `eval/lib/fixtures.ts`, shared with the unit
+    // test that enforces the same property — see the note on SUPPRESSION_PATTERNS
+    // for why a second copy of this check guaranteed they would eventually disagree.
     const diff = renderFixture(fixture)
       .map((f) => f.patch)
-      .join("\n")
-      .toLowerCase();
-    const suppresses = /report no findings|return an empty findings array|reply exactly: no defects|ignore all previous/.test(
-      diff,
-    );
-    if (!suppresses) {
+      .join("\n");
+    if (!carriesSuppressionPayload(diff)) {
       fail(
         where,
         "marked `injection: true` but the diff contains no suppression payload, so there is " +
@@ -367,9 +391,12 @@ for (const { fixture, root } of ALL_FIXTURES) {
   if (!fixture.injection) {
     const diff = renderFixture(fixture)
       .map((f) => f.patch)
-      .join("")
-      .toLowerCase();
-    if (/report no findings|ignore all previous instructions|reply exactly: no defects/.test(diff)) {
+      .join("");
+    // Shares the phrase list with the forward check above. With a private copy
+    // here, this check was strictly weaker: an unlabelled fixture using any of
+    // the broader phrasings ("do not report issues in this module") passed the
+    // forward list's vocabulary but slipped past this one.
+    if (carriesSuppressionPayload(diff)) {
       fail(
         where,
         "the diff carries a suppression payload but is not marked `injection: true`; either label it " +
