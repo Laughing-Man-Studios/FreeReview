@@ -78,6 +78,34 @@ if (doc.runs === null || typeof doc.runs !== "object") {
   fail("action.yml 'runs' must be a mapping.");
 }
 
+// --- Marketplace submission constraints -----------------------------------
+//
+// GitHub rejects the Marketplace submission over these, and only at submission
+// time — long after the tag, the release, and CI are all green. Found the hard
+// way during the v1 submission, so they are checked here instead.
+
+// Rejection reads "Description must be less than 125 characters", so 125
+// itself is already too long. The boundary is exclusive.
+if (typeof doc.description !== "string") {
+  fail("action.yml 'description' must be a string.");
+} else if (doc.description.length >= 125) {
+  fail(
+    `action.yml 'description' is ${doc.description.length} characters.`,
+    "GitHub rejects the Marketplace submission unless it is under 125. The action still runs, so nothing local catches this.",
+  );
+}
+
+// 'name' must be unique across every action, user, and organization on
+// GitHub, which is a global namespace this repository cannot inspect. Only the
+// length bound is checkable locally; uniqueness has to be confirmed by
+// submitting. Renaming is otherwise free: `uses:` resolves on owner/repo and
+// never on this field, so a display-name change cannot break `@v1` for anyone.
+if (typeof doc.name !== "string" || doc.name.trim().length === 0) {
+  fail("action.yml 'name' must be a non-empty string.");
+} else if (doc.name.length > 64) {
+  fail(`action.yml 'name' is ${doc.name.length} characters; GitHub caps it at 64.`);
+}
+
 // --- runs.using -----------------------------------------------------------
 
 const using = doc.runs.using;

@@ -1,5 +1,7 @@
 name: "FreeReview"
-description: "Advisory AI code review for pull requests, using only $0 OpenRouter free-model endpoints. Never approves, blocks, or fails a build."
+# Under 125 characters: GitHub rejects the Marketplace submission otherwise,
+# and does so only at submission time. `npm run check:action` guards the bound.
+description: "Advisory AI code review on pull requests using free models only. Never approves, blocks, or fails a build."
 author: "Rogibb111"
 
 branding:
