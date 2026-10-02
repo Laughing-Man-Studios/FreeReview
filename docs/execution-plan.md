@@ -835,10 +835,10 @@ Deviations from the plan, and why:
 
 Wiring: `run.ts` now anchors, validates, dedupes, re-checks the head SHA, and publishes. `event: COMMENT` is the only value the payload can take, asserted at both the publisher and the pipeline level.
 
-### Phase 7 — Golden dataset & evaluation — **MOSTLY COMPLETE; prompt iteration outstanding**
+### Phase 7 — Golden dataset & evaluation — **COMPLETE; prompt iteration deferred**
 Authored Stage A (17) and Stage B (10) with `validate:fixtures`; built `eval/{run,score}.ts` with a content-addressed cache, capability probing and an availability probe; measured all 8 catalog models; ran 3 repeated passes to establish variance; ran Stage B **once**.
 **Done:** dataset, harness, scoring, full-catalog measurement, capability matrix, error bars, Stage B one-shot, injection disclosure.
-**Outstanding:** ≤ 8 targeted prompt iterations (capped, not yet started). The target is now specific — every model measured has missed the falsy-null coercion (`cart.discount == 0`).
+**Deferred, deliberately:** ≤ 8 targeted prompt iterations (capped, not started). The target is specific — every model measured has missed the falsy-null coercion (`cart.discount == 0`). Deferred past v1 rather than dropped: there is no uncontaminated held-out data left to score an iteration against, so a prompt tuned now could only be validated on fixtures it has already seen. Doing it after new fixtures exist is the only version whose result would mean anything.
 **Exit revised:** the held-out column cannot be re-measured, because all held-out data is spent. Exit is now "thresholds justified argumentarily and enforced in code", with the measured numbers in `docs/model-evaluation.md`.
 **`thresholds.json` was never written**, deliberately. See §12.
 
@@ -990,7 +990,7 @@ A prompt iteration re-runs the same fixtures against the same diffs. The unchang
 
 This is worth building because it attacks the cost directly rather than the ceiling: it is the difference between ~200 requests and materially fewer, and it makes the *unfunded* path viable rather than merely slow. The cache is bypassable via `--no-cache` when a provider-side change makes a fresh response genuinely informative, which is a rarer event than it sounds and should be recorded when it happens.
 
-### Phase 8 — Hardening, docs, release — **SUBSTANTIALLY COMPLETE; v1 cut outstanding**
+### Phase 8 — Hardening, docs, release — **COMPLETE; v1.0.0 cut 2026-10-02**
 **Documentation audit completed 2026-10-01.** README's model table, this plan's
 §12 thresholds, the Phase 7 status, and the Stage A cross-examination record were
 all stale and have been corrected. `privacyVerifiedOn` is now populated for every

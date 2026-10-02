@@ -166,15 +166,24 @@ Stated plainly, because a baseline that overstates itself is worse than none.
 7. **The default model flags injection payloads as findings.** Correctly, but
    the action cannot distinguish that from a real defect when publishing.
 
-## What Phase 7 does next
+## What comes after v1
+
+None of this was a v1 blocker, and none of it should be read as unfinished
+validation of what shipped — the numbers above are the real ones. This is the
+queue for the next round, and it is deliberately ordered so that the cheap
+unblocking work happens before the expensive measurement work:
 
 1. Persist the cache as an artifact so iterations stop paying full price.
 2. Re-measure `qwen` when it is not rate-limited, and either add a fourth model
    or drop it with a recorded reason.
-3. Cluster the two remaining default-model misses and iterate the prompt against
-   them, capped at 8 measured iterations.
-4. Grow held-out toward 8–10 with Stage B fixtures before treating any score as a
-   gate rather than a signal.
+3. Grow held-out toward 8–10 with new fixtures, **before** iterating the prompt.
+   Item 3 was originally a single step, "iterate the prompt against the two
+   remaining misses." It was split because there is no uncontaminated data left
+   to score an iteration against — every fixture has been seen. Tuning first and
+   validating afterwards would measure the model on the data the prompt was
+   fitted to, which is the one result guaranteed to look good.
+4. Then iterate the prompt against the clustered misses, capped at 8 measured
+   iterations.
 
 
 ---

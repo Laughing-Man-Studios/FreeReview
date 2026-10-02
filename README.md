@@ -9,34 +9,63 @@
 [![Code of Conduct](https://img.shields.io/badge/CoC-contribute-lightgrey.svg)](CODE_OF_CONDUCT.md)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-lightgrey.svg)](SECURITY.md)
 
-> ### ⚠️ Pre-release — not yet published to the Marketplace
+> ### ✅ Released — v1.0.0
 >
-> **The action now reviews pull requests end to end.** Phases 0–6 of 8 are
-> complete and verified live against a real repository on 2026-09-29: a real
-> off-by-one was found, anchored to the correct line, and published as an
-> advisory `COMMENT` review using one OpenRouter request.
+> ```yaml
+> - uses: Laughing-Man-Studios/FreeReview@v1
+>   with:
+>     openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+> ```
 >
-> Phases 7–8 remain: a scored evaluation against a golden dataset, and
-> hardening plus the first tagged release. The Marketplace listing is held until
-> the model is selected on measured results rather than assumption.
+> **What it is.** A model *proposes* findings; deterministic local code decides
+> whether each one can be anchored to exactly one verified location in the diff,
+> and either publishes it as an advisory `COMMENT` or discards it. The model
+> never supplies a line number. It never runs your code, never checks out your
+> repo, and costs $0 by construction rather than by free-tier allowance.
+>
+> **Measured, and how far to trust that.** A scored evaluation over 27 fixtures
+> in two stages selected the default model. The shipped configuration reaches
+> **0.88 recall, 0.88 precision, and no false positives**, with anchor
+> correctness at 1.00 — a finding is either placed on a verified line or
+> dropped. Read the sample size before the number: 27 fixtures, one finding
+> worth ~4% of recall, measured variance of ±0.13 to ±0.26, and no uncontaminated
+> data left in reserve. Treat the *ordering* of models as the finding, not any
+> single score. Full numbers, including the two stages that disagreed, are in
+> [`docs/model-evaluation.md`](docs/model-evaluation.md).
 >
 > **What to know before you rely on it:**
 >
+> - **Injection resistance rests on a very small sample.** The default model
+>   resisted both planted payloads (`0 / 2`) and produced no false positives,
+>   while every fallback model complied with at least one. That is the main
+>   reason it ships. But it is two payloads across five observations, and it is
+>   the single most important property here: a model that follows instructions
+>   written into your diff is a channel by which a pull request author decides
+>   whether their own code gets examined. Under `privacy_mode: relaxed`, where
+>   a compliant model may be selected, **the review can be steered by the code
+>   under review.** The action discloses this in the published review body; it
+>   does not prevent it.
+> - **The default model also flags the injection payload itself.** On both
+>   injection fixtures it reported the instruction text as a finding, landing a
+>   comment on a line that is not itself defective. It found the real bug *and*
+>   the attempt to suppress it, but the action cannot tell those apart when
+>   publishing. Known limitation, not a scored failure.
 > - **The free model pool is thin under strict privacy.** Of the 17 free models
 >   in the catalog, exactly one has a zero-data-retention endpoint. Strict mode
->   is the default, so that model is the default path. It has no structured
->   output support, so it relies on defensive parsing rather than API-enforced
->   JSON. It is a real review; its finding quality has not yet been measured.
-> - **Findings are advisory and can be wrong.** The review never blocks a merge,
->   never requests changes, and never fails your workflow.
+>   is the default, so that model is the default path and three of the eight
+>   configured models are disabled as unreachable. If it is unavailable, the
+>   action skips the review rather than silently relaxing the constraint.
+> - **Findings are advisory and can be wrong.** The review never approves, never
+>   requests changes, never blocks a merge, and never fails your workflow — so a
+>   bad model run costs you a comment, not a merge.
 > - **Endpoint privacy cannot be independently verified at runtime.** OpenRouter
 >   gates its per-endpoint privacy APIs behind a management key. The action
 >   enforces the constraint per request and records a manually verified model
->   list, but it does not claim a guarantee it cannot make. See
->   [`SECURITY.md`](SECURITY.md).
+>   list (`privacyVerifiedOn: 2026-09-29`), but it does not claim a guarantee it
+>   cannot make. See [`SECURITY.md`](SECURITY.md).
 >
-> Follow along in [`docs/execution-plan.md`](docs/execution-plan.md), or watch
-> the repository.
+> Design rationale and build history are in
+> [`docs/execution-plan.md`](docs/execution-plan.md).
 
 ---
 
@@ -46,7 +75,7 @@
 | --- | --- |
 | **It costs nothing.** | Every request uses an explicit `:free` model. Three independent guards make paid routing impossible, one of which is enforced server-side by OpenRouter. Not a free tier that expires — a genuinely $0 operating model. |
 | **It never runs your code.** | No `actions/checkout`, no package manager, no tests, no build. Everything comes from the GitHub API. This is asserted against the shipped bundle in CI, not just documented. |
-| **It never places a comment on code the model did not quote.** | The model never supplies a line number. It quotes source text; deterministic local code maps that text to exactly one verified diff location, or declines to comment. *This is a placement guarantee, not a correctness one — the model can still be wrong about the line it quotes. Findings are advisory, and Phase 7 measures how often.* |
+| **It never places a comment on code the model did not quote.** | The model never supplies a line number. It quotes source text; deterministic local code maps that text to exactly one verified diff location, or declines to comment. *This is a placement guarantee, not a correctness one — the model can still be wrong about the line it quotes. Findings are advisory, and [the evaluation](docs/model-evaluation.md) measures how often.* |
 | **Privacy is enforced, not implied.** | By default, requests carry `provider.zdr: true` and `provider.data_collection: "deny"`. If no eligible endpoint qualifies, the action **skips the review** rather than quietly relaxing the constraint. |
 
 The incumbents — CodeRabbit, Copilot, Sourcery — all cost money, and all of

@@ -165,8 +165,47 @@ describe("the execution plan does not promise things that do not exist", () => {
     expect(PLAN).toMatch(/superseded by 7b and 7c/i);
   });
 
-  it("records Phase 7 as outstanding rather than complete", () => {
-    expect(PLAN).toMatch(/prompt iteration outstanding/i);
+  it("does not quietly finish Phase 7 by relabelling deferred work as done", () => {
+    // This guard used to assert the literal string "prompt iteration
+    // outstanding", back when the plan's heading read "MOSTLY COMPLETE". Phase 7's
+    // deliverables are now finished and prompt iteration is deferred past v1, so
+    // the literal is stale — but the reason the guard exists is not. It exists to
+    // stop the plan from looking finished by deleting inconvenient work.
+    //
+    // So the invariant is now the pair: the deferred item must still be recorded
+    // *as* deferred, and it must carry a reason. Asserting only "deferred" would
+    // pass a plan that had simply moved the work somewhere flattering; asserting
+    // only the heading would pass one that dropped the body.
+    const plan = flat(PLAN);
+
+    // Still on the books, not deleted.
+    expect(plan).toMatch(/prompt iteration/i);
+
+    // Marked as not-done rather than quietly folded into "complete".
+    expect(plan).toMatch(/deferred|outstanding|not started/i);
+
+    // And the deferral is justified, not merely asserted. Anchored on the
+    // rationale itself, not on the heading — the heading mentions the item, the
+    // rationale is what has to carry the reason.
+    //
+    // Bounded to the deferral's own LINE, and read from the RAW markdown rather
+    // than `flat`. Two separate bleed-throughs were caught by mutation here, and
+    // both made a contentless deferral pass:
+    //
+    //   1. `flat` collapses every whitespace run to a single space, so it has no
+    //      blank lines to split on and a "paragraph" bound silently spans the
+    //      rest of the document.
+    //   2. Bounding to a blank-line paragraph does not help either, because the
+    //      plan runs bold-led lines together without blank lines between them —
+    //      the next line is "**Exit revised:** the held-out column cannot be
+    //      re-measured", which matches on "held-out" no matter what the
+    //      deferral says.
+    //
+    // The reason therefore has to live on the same line as the deferral itself.
+    const rationale = PLAN.search(/deferred, deliberately|deferred past v1/i);
+    expect(rationale).toBeGreaterThan(-1);
+    const line = PLAN.slice(rationale).split("\n")[0];
+    expect(line).toMatch(/held-?out|uncontaminated|already seen|it has seen/i);
   });
 
   it("does not claim anchor acceptance is a gate", () => {
