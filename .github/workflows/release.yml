@@ -200,15 +200,72 @@ jobs:
             echo "- Tag: \`${TAG}\`"
             echo "- Commit: $(git rev-parse --short HEAD)"
             echo "- Moving ref: ${REF_STATE}"
+            echo "- Tag permission: ${{ steps.permission.outputs.result }}"
             echo
             echo "The README and the Marketplace listing install \`@${REF}\`. A tag alone does"
             echo "not satisfy that; the ref above is what makes the documented install work."
             echo
+            if [ "${{ steps.permission.outputs.result }}" != "ok" ]; then
+              echo "**This run cannot tag.** See the note above — cut the tag yourself, then"
+              echo "re-run \`consumer-smoke.yml\` with \`ref: ${REF}\`."
+              echo
+            fi
             echo "### Notes"
             cat /tmp/notes.md
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "Dry run complete. Nothing was tagged, no release was published, and ${REF} was not moved."
+
+      # --- 4b. Can this workflow actually push? ----------------------------
+      # Answered before anything is tagged, because the failure otherwise
+      # surfaces halfway through a release: the tag would exist and the release
+      # would not.
+      #
+      # `git push --dry-run` authenticates and checks branch protection and token
+      # permissions without writing anything, so it answers the only question that
+      # matters — can *this* token create the ref — rather than whether the
+      # repository accepts pushes in principle.
+      #
+      # A workflow triggered from the UI uses the repository's own
+      # `GITHUB_TOKEN`, whose ability to create tags and releases depends on the
+      # organisation's settings. That is not knowable in advance, so it is probed.
+      - name: Probe write permission
+        id: permission
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # Never fail the dry run on this: its purpose is to report the answer.
+          PROBE_REF="refs/heads/_permission-probe-${{ github.run_id }}"
+
+          if git push --dry-run origin "HEAD:${PROBE_REF}" >/tmp/probe.log 2>&1; then
+            echo "result=ok" >> "$GITHUB_OUTPUT"
+            echo "This workflow can create refs and tags."
+          else
+            echo "result=denied" >> "$GITHUB_OUTPUT"
+            echo "::warning::title=Release token cannot push::This workflow could not verify write permission. A real release will fail at the tagging step."
+            {
+              echo
+              echo "### ⚠️ This workflow cannot tag"
+              echo
+              echo 'The token available to this run cannot create refs, so cutting a release'
+              echo 'through it will fail *after* the tag step. Two ways forward:'
+              echo
+              echo '1. Run the workflow from the UI and accept that it will fail, then tag and'
+              echo '   publish yourself — the verification steps already passed, so the bundle is'
+              echo '   confirmed good.'
+              echo '2. Create the tag and release from your own account, then re-run'
+              echo '   `consumer-smoke.yml` with `ref: v1`.'
+              echo
+              echo '<details><summary>probe output</summary>'
+              echo
+              echo '```'
+              cat /tmp/probe.log
+              echo '```'
+              echo
+              echo '</details>'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       # --- 5. Tag and publish ----------------------------------------------
       - name: Tag and publish
