@@ -53,43 +53,19 @@ jobs:
 
           git checkout -B "$BRANCH"
 
-          # Writes the probe workflow itself, pinned to the requested ref.
+          # Only the source file is written here.
           #
-          # Two reasons, and the second is the important one:
+          # An earlier version also wrote the probe workflow itself, pinned to the
+          # requested ref, so that its paths filter would fire. That cannot work:
+          # GitHub refuses to let a workflow push a change to a file under
+          # .github/workflows without the `workflows` scope, so the push was
+          # rejected and the probe never ran. Granting that scope to a smoke test
+          # would also mean asking every consumer to let CI rewrite its own CI.
           #
-          #  1. The probe is path-filtered to fire only when this file changes, so
-          #     without writing it the probe never runs at all. It has never run.
-          #  2. Writing it *here* is what pins the ref under test. A probe file
-          #     committed to the branch by hand gets clobbered by the next run,
-          #     because this workflow force-pushes the branch from main.
-          #
-          # Together these mean the ref under test can never drift from the ref
-          # actually exercised.
-          mkdir -p .github/workflows
-          cat > .github/workflows/consumer-smoke-probe.yml <<'PROBE'
-          name: probe
-          on:
-            pull_request:
-              paths: [".github/workflows/consumer-smoke-probe.yml"]
+          # The probe therefore lives on the branch, runs on every pull request
+          # because it has no paths filter, and is re-pinned by a maintainer when
+          # the ref under test changes.
 
-          permissions:
-            contents: read
-            pull-requests: write
-
-          jobs:
-            review:
-              runs-on: ubuntu-latest
-              steps:
-                - uses: Laughing-Man-Studios/FreeReview@__REF__
-                  with:
-                    openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
-                    github_token: ${{ github.token }}
-          PROBE
-          sed -i "s|@__REF__|@${REF}|" .github/workflows/consumer-smoke-probe.yml
-
-          # A real file with a real defect. An empty commit exercises the
-          # "nothing to review" path instead, which proves much less: the review
-          # then correctly finds nothing, and a broken run looks like a pass.
           mkdir -p src
           cat > src/consumer-smoke-probe.ts <<'SRC'
           export function percentile(values: number[], p: number): number {
@@ -101,8 +77,10 @@ jobs:
           }
           SRC
 
-          git add .github/workflows/consumer-smoke-probe.yml src/consumer-smoke-probe.ts
-          git commit -m "test: exercise FreeReview@${REF} on a clean diff"
+          git add src/consumer-smoke-probe.ts
+          # The probe file is byte-identical on every run after the first, so the
+          # commit would fail. The push still has to happen to retrigger the probe.
+          git commit --allow-empty -m "test: exercise FreeReview@${REF} on a clean diff"
 
           PUSHED=0
           if git push --force origin "$BRANCH"; then PUSHED=1; fi
