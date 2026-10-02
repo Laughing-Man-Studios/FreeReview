@@ -84,12 +84,16 @@ jobs:
             exit 1
           fi
 
-          echo "version=${NORMALISED}" >> "$GITHUB_OUTPUT"
-          echo "tag=v${NORMALISED}" >> "$GITHUB_OUTPUT"
-          # The major is what the moving ref is named. Extracted from the validated
-          # normalised version, never from the raw input, so `v1.0.0`, `1.0.0` and
-          # `01.0.0` all resolve the same way.
-          echo "major=${NORMALISED%%.*}" >> "$GITHUB_OUTPUT"
+          # One grouped redirect rather than three. actionlint/shellcheck SC2129:
+          # separate `>>` appends to the same file each reopen it.
+          {
+            echo "version=${NORMALISED}"
+            echo "tag=v${NORMALISED}"
+            # The major is what the moving ref is named. Taken from the validated
+            # normalised version, never the raw input, so `v1.0.0`, `1.0.0` and
+            # `01.0.0` all resolve the same way.
+            echo "major=${NORMALISED%%.*}"
+          } >> "$GITHUB_OUTPUT"
           echo "Releasing v${NORMALISED} (moving ref will be 'v${NORMALISED%%.*}')"
 
       # --- 2. The artifact must be built from this exact source -------------
@@ -145,15 +149,18 @@ jobs:
             # Slice the section headed `## [x.y.z]` up to the next `## `.
             # Always exits 0; presence is reported via the sentinel file.
             #
-            # shellcheck disable=SC2016
-            # SC2016 is a false positive here: the `${...}` sequences are
-            # JavaScript template literals inside a single-quoted heredoc, and
-            # the shell correctly must NOT expand them.
+            # String concatenation rather than a template literal, deliberately.
+            # A `${...}` inside this single-quoted script is correct JavaScript and
+            # correct shell (the shell must not expand it), but shellcheck cannot
+            # tell the difference and reports SC2016. Rewriting the two
+            # interpolations as concatenation removes the ambiguity at its source
+            # instead of suppressing a warning that would otherwise need a disable
+            # comment sitting inside a shell block — where it is easy to lose.
             node -e '
               const fs = require("node:fs");
               const version = process.argv[1].replace(/[.\-]/g, "\\$&");
               const lines = fs.readFileSync("CHANGELOG.md", "utf8").split("\n");
-              const start = lines.findIndex((l) => new RegExp(`^## \\[?${version}\\]?`).test(l));
+              const start = lines.findIndex((l) => new RegExp("^## \\[?" + version + "\\]?").test(l));
               if (start === -1) { process.exit(0); }
               let end = lines.length;
               for (let i = start + 1; i < lines.length; i++) {
@@ -175,6 +182,57 @@ jobs:
           fi
 
           echo "Release notes source: $(cat "$SENTINEL")"
+
+      # --- 4b. Can this workflow actually push? ----------------------------
+      # Answered before anything is tagged, because the failure otherwise
+      # surfaces halfway through a release: the tag would exist and the release
+      # would not.
+      #
+      # `git push --dry-run` authenticates and checks branch protection and token
+      # permissions without writing anything, so it answers the only question that
+      # matters — can *this* token create the ref — rather than whether the
+      # repository accepts pushes in principle.
+      #
+      # A workflow triggered from the UI uses the repository's own
+      # `GITHUB_TOKEN`, whose ability to create tags and releases depends on the
+      # organisation's settings. That is not knowable in advance, so it is probed.
+      - name: Probe write permission
+        id: permission
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -uo pipefail
+          # Never fail the dry run on this: its purpose is to report the answer.
+          PROBE_REF="refs/heads/_permission-probe-${{ github.run_id }}"
+
+          if git push --dry-run origin "HEAD:${PROBE_REF}" >/tmp/probe.log 2>&1; then
+            { echo "result=ok"; } >> "$GITHUB_OUTPUT"
+            echo "This workflow can create refs and tags."
+          else
+            { echo "result=denied"; } >> "$GITHUB_OUTPUT"
+            echo "::warning::title=Release token cannot push::This workflow could not verify write permission. A real release will fail at the tagging step."
+            {
+              echo
+              echo "### ⚠️ This workflow cannot tag"
+              echo
+              echo 'The token available to this run cannot create refs, so cutting a release'
+              echo 'through it will fail *after* the tag step. Two ways forward:'
+              echo
+              echo '1. Run the workflow from the UI and accept that it will fail, then tag and'
+              echo '   publish yourself — the verification steps already passed, so the bundle is'
+              echo '   confirmed good.'
+              echo '2. Create the tag and release from your own account, then re-run'
+              echo '   consumer-smoke.yml with ref: v1.'
+              echo
+              echo '<details><summary>probe output</summary>'
+              echo
+              echo '```'
+              cat /tmp/probe.log
+              echo '```'
+              echo
+              echo '</details>'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Dry run summary
         if: ${{ inputs.dry_run }}
@@ -215,57 +273,6 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
           echo "Dry run complete. Nothing was tagged, no release was published, and ${REF} was not moved."
-
-      # --- 4b. Can this workflow actually push? ----------------------------
-      # Answered before anything is tagged, because the failure otherwise
-      # surfaces halfway through a release: the tag would exist and the release
-      # would not.
-      #
-      # `git push --dry-run` authenticates and checks branch protection and token
-      # permissions without writing anything, so it answers the only question that
-      # matters — can *this* token create the ref — rather than whether the
-      # repository accepts pushes in principle.
-      #
-      # A workflow triggered from the UI uses the repository's own
-      # `GITHUB_TOKEN`, whose ability to create tags and releases depends on the
-      # organisation's settings. That is not knowable in advance, so it is probed.
-      - name: Probe write permission
-        id: permission
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -uo pipefail
-          # Never fail the dry run on this: its purpose is to report the answer.
-          PROBE_REF="refs/heads/_permission-probe-${{ github.run_id }}"
-
-          if git push --dry-run origin "HEAD:${PROBE_REF}" >/tmp/probe.log 2>&1; then
-            echo "result=ok" >> "$GITHUB_OUTPUT"
-            echo "This workflow can create refs and tags."
-          else
-            echo "result=denied" >> "$GITHUB_OUTPUT"
-            echo "::warning::title=Release token cannot push::This workflow could not verify write permission. A real release will fail at the tagging step."
-            {
-              echo
-              echo "### ⚠️ This workflow cannot tag"
-              echo
-              echo 'The token available to this run cannot create refs, so cutting a release'
-              echo 'through it will fail *after* the tag step. Two ways forward:'
-              echo
-              echo '1. Run the workflow from the UI and accept that it will fail, then tag and'
-              echo '   publish yourself — the verification steps already passed, so the bundle is'
-              echo '   confirmed good.'
-              echo '2. Create the tag and release from your own account, then re-run'
-              echo '   `consumer-smoke.yml` with `ref: v1`.'
-              echo
-              echo '<details><summary>probe output</summary>'
-              echo
-              echo '```'
-              cat /tmp/probe.log
-              echo '```'
-              echo
-              echo '</details>'
-            } >> "$GITHUB_STEP_SUMMARY"
-          fi
 
       # --- 5. Tag and publish ----------------------------------------------
       - name: Tag and publish

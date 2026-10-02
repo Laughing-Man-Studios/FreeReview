@@ -22,7 +22,8 @@
     "eval:rescore": "tsx eval/rescore.ts",
     "eval:probe": "tsx eval/probe.ts",
     "eval:generate": "tsx eval/generate.ts",
-    "verify-models": "tsx eval/verify-models.ts"
+    "verify-models": "tsx eval/verify-models.ts",
+    "lint:workflows": "docker run --rm -v \"$PWD:/repo\" -w /repo rhysd/actionlint:1.7.12"
   },
   "devDependencies": {
     "@eslint/js": "^9.20.0",
