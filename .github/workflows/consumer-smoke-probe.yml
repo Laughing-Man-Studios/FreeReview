@@ -1,7 +1,6 @@
 name: probe
 on:
   pull_request:
-    paths: [".github/workflows/consumer-smoke-probe.yml"]
 
 permissions:
   contents: read
@@ -11,7 +10,7 @@ jobs:
   review:
     runs-on: ubuntu-latest
     steps:
-      - uses: Laughing-Man-Studios/FreeReview@v0.1.0
+      - uses: Laughing-Man-Studios/FreeReview@v1
         with:
           openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
           github_token: ${{ github.token }}
