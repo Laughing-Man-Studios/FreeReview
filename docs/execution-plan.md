@@ -1081,6 +1081,62 @@ Weekly + `workflow_dispatch`. Asserts every default model still exists, ends `:f
 ### 14.3 Release
 Tag `v*` → `tsup` → `check:dist` → assert `dist/index.js` free of `child_process`/`eval` → commit `dist/` → publish tag. `dist/` is committed (required for a JS action), so the security grep runs on the artifact that actually ships.
 
+### 14.3a Publishing to the GitHub Marketplace — manual, and ordered
+
+**The Marketplace listing is not something `release.yml` can do.** Publication
+happens through a *release object*: open `action.yml` on GitHub, click **Draft a
+release**, tick **"Publish this Action to the GitHub Marketplace"**. That flag is
+set in the release UI and has no equivalent in `gh release create` or the REST
+API. Every listing change is therefore a manual UI step, and `v1.0.0` — cut by
+`release.yml` — is **not** a Marketplace release.
+
+**Immutable releases are enabled and owner-enforced on this repository**
+(`enforced_by_owner: true`; `DELETE .../immutable-releases` returns `409`). Two
+consequences, both learned the hard way on 2026-10-02:
+
+- A tag can never be reused or deleted. A failed submission attempt that burned
+  `v1.0.0` cannot be recovered by re-tagging.
+- Whether an *existing* release can be edited to add the flag is unknown. A
+  no-op `PATCH` is accepted, which proves nothing — the immutable fields are the
+  ones that would reject a real change, and testing that means mutating a
+  published release.
+
+**The order matters, and it is the reverse of the obvious one.** The tempting
+sequence is to let `release.yml` cut the version — keeping its dist verification,
+security assertions, and `v1` branch advance — and then edit the release to add
+the Marketplace flag. Do not. If the edit is rejected, you are left with a
+published release that cannot be converted, and the only escape is to cut
+*another* version. That burns a version number to discover a permission you could
+have tested for free.
+
+**So, in order:**
+
+1. **Create the release manually, with the Marketplace box ticked.** New tag
+   (`v1.0.1`), from `main`, with 2FA. This is the step that cannot be automated
+   or retried, so it goes first while the version number is still unspent.
+2. **Then advance the `vX` branch.** `release.yml` does not run in this path, so
+   nothing moves `v1` on its own — the branch stays where the last automated
+   release left it. One force-push of `refs/heads/vX` to the new tag's commit
+   restores the invariant, and it is the same operation `release.yml` already
+   performs. Immutability does not govern branches, so this is permitted.
+3. **Verify with `consumer-smoke.yml`** against `ref: v1`, as for any release.
+
+**Prerequisites, all verified except the last.** Public repository ✅. Exactly
+one `action.yml` at the root ✅. `name` unique across all of GitHub — unverified
+and not verifiable from here, since there is no API for that namespace; the
+first submission is the test. Developer Agreement accepted by the org owner —
+checkable only by whether the checkbox is enabled, and a greyed-out box is the
+symptom.
+
+### 14.3b Metadata drift between `main` and the `vX` branch
+
+A manually created release leaves the `vX` branch behind by construction, so
+`action.yml` on `@vX` can differ from `action.yml` on `main`. When that happens
+the Marketplace page and the installed action disagree on `name` and
+`description`. It is cosmetic — neither field affects execution, and `uses:`
+resolves on owner/repo — but it reads as a bug to anyone who checks. Recorded
+here because the fix is step 2 of §14.3a, not a separate investigation.
+
 ### 14.4 Dogfood
 A workflow in this repo running the action on its own PRs. Findings here are advisory like everywhere else. Primary validation that anchoring works on real diffs.
 

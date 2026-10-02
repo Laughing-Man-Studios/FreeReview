@@ -21,6 +21,9 @@ To cut a release:
 3. Confirm the result by running the **consumer-smoke** workflow against the
    moving ref (`ref: v1`) and opening the pull request it reports.
 
+Steps 1–3 produce a GitHub release. They do **not** publish the action to the
+Marketplace — see the note below, which is a required fourth step.
+
 The workflow rebuilds, verifies the committed `dist/` matches source, re-runs the
 security assertions against the bundle, tags, publishes, and then **moves the
 `vX` branch** and verifies that ref resolves and carries a loadable `action.yml`.
@@ -32,8 +35,88 @@ branch would leave the documented install broken while the release looked
 successful. Subversion bumps work by re-pointing the branch: cutting `v1.4.0`
 moves `v1` forward and consumers on `@v1` receive it.
 
-> **Marketplace.** Not yet published to the GitHub Marketplace. The action works
-> from any repository via `uses: Laughing-Man-Studios/FreeReview@v1`.
+> **Marketplace.** Publishing to the GitHub Marketplace is a **manual** step that
+> the Release workflow cannot perform — the "Publish this Action to the GitHub
+> Marketplace" flag lives on the release object and has no API equivalent. So a
+> release cut by this workflow is *not* a Marketplace release.
+>
+> Immutable releases are enabled and owner-enforced here, so a tag can never be
+> reused or deleted. That dictates the order, and it is the reverse of the
+> obvious one. Do **not** run the Release workflow and then edit the release to
+> add the flag: if the edit is rejected, you hold a published release that
+> cannot be converted, and the only escape is to cut another version. Instead:
+>
+> 1. Create the release by hand with the Marketplace box ticked, from a new tag.
+> 2. *Then* move the `vX` branch to that tag — the workflow does not run in this
+>    path, so nothing advances the branch on its own.
+> 3. Verify with the **consumer-smoke** workflow against `ref: v1`.
+>
+> Full rationale, including the prerequisites and the one that cannot be checked
+> from inside the repository, is in `docs/execution-plan.md` §14.3a.
+
+## [1.0.1] — 2026-10-02
+
+Marketplace metadata and documentation. **No change to review behaviour, the
+model pool, or the security posture** — the shipped action code is identical to
+`v1.0.0`. This release exists because the listing could not be submitted without
+it, and because the README was describing the action as unreleased.
+
+### Fixed
+
+- **`action.yml`'s description now passes the Marketplace submission.** It was
+  131 characters against a limit of 125. The action ran correctly throughout, so
+  nothing local caught it — the constraint is only enforced when a person
+  submits the listing. `npm run check:action` now enforces the bound, verified at
+  its edges: 125 characters fails, 124 passes.
+- **Display name is now `Free Review Action`.** GitHub requires `name` to be
+  unique across every action, user, and organisation, and `FreeReview` was
+  already taken. This is display metadata only: `uses:` resolves on owner/repo, so
+  `uses: Laughing-Man-Studios/FreeReview@v1` is unaffected for existing
+  consumers. The published review header (`## FreeReview`) is a separate
+  constant in `src/output/comment.ts` and is deliberately unchanged, so the
+  consumer smoke test's grep for it still matches.
+- **The README no longer advertises the action as unreleased and unmeasured.**
+  Its banner still claimed the Marketplace listing was pending and that finding
+  quality "has not yet been measured" — both false since `v1.0.0`, and the
+  banner renders directly into the Marketplace listing, so it would have been
+  read by exactly the audience deciding whether to trust the action.
+
+### Known limitations, restated
+
+These are unchanged from `v1.0.0` and are not new; the README rewrite made them
+visible rather than adding them.
+
+- **Only the default model resists prompt injection**, and the fallbacks have all
+  complied with at least one planted payload. Under `privacy_mode: relaxed`, a
+  compliant model may be selected, which means **the review can be steered by
+  the code under review**. The action discloses this in the published review
+  body; it does not prevent it. This remains the largest open weakness.
+- **Reviews are advisory.** They never block a merge, never request changes, and
+  never fail a workflow, so a bad model run costs a comment and not a merge.
+- **Reviews cover changed lines only.** Unchanged context is never commented on.
+- **Redaction is not a substitute for rotating a leaked key.** Shapes that are
+  not recognisable are not redacted.
+- **Private repositories only.** A public repository is skipped entirely.
+
+### Fixed (release tooling, not the action)
+
+- **`consumer-smoke.yml` polled the wrong endpoint for the review.** It queried
+  `/issues/N/comments`, which never contains a review, so a *successful* run was
+  reported as a failure after ten minutes of polling.
+- **The smoke test's probe never ran — once.** It was path-filtered to fire only
+  when its own file changed, and nothing ever changed it. What had been verifying
+  releases was an unrelated workflow in the test repository. The probe now runs
+  on every pull request.
+- **The smoke test no longer tries to write a workflow file.** An earlier fix had
+  it write the probe itself, which GitHub rejects: a workflow cannot push a
+  change under `.github/workflows` without the `workflows` scope, and granting
+  that to a smoke test would mean asking every consumer to let CI rewrite its own
+  CI.
+
+### Verified
+
+`@v1` resolves, installs from a clean consumer repository, reviewed a
+seven-line diff, and published two findings, both anchored to verified lines.
 
 ## [1.0.0] — 2026-10-01
 

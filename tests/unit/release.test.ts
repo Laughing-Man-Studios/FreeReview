@@ -30,6 +30,32 @@ const RELEASE = read(".github/workflows/release.yml");
 const CHANGELOG = read("CHANGELOG.md");
 const README = read("README.md");
 
+/**
+ * The body of one `## [x.y.z]` section, sliced the way `release.yml` slices it.
+ *
+ * The obvious alternative — `slice(indexOf("## [1.0.0]"), indexOf("## [Unreleased]"))`
+ * — silently stops being a section boundary the moment a second version exists:
+ * every later section gets swallowed into the first one's text, and the tests
+ * keep passing because they are now asserting against a merged blob. A caveat
+ * deleted from `v1.0.0` would go unnoticed for as long as some later version
+ * happened to restate it. The workflow's own rule is "from this heading to the
+ * next `## `", so the helper uses that rule.
+ */
+const sectionOf = (version: string): string => {
+  const lines = CHANGELOG.split("\n");
+  const escaped = version.replace(/[.\-]/g, "\\$&");
+  const start = lines.findIndex((l) => new RegExp(`^## \\[?${escaped}\\]?`).test(l));
+  if (start === -1) return "";
+  let end = lines.length;
+  for (let i = start + 1; i < lines.length; i++) {
+    if (/^## /.test(lines[i])) {
+      end = i;
+      break;
+    }
+  }
+  return lines.slice(start + 1, end).join("\n");
+};
+
 describe("the release maintains the major-version ref", () => {
   it("moves it after tagging, not before", () => {
     // Before the tag exists there is nothing to point at, and a partial order
@@ -101,7 +127,7 @@ describe("the documented install matches what the release produces", () => {
   });
 
   it("the CHANGELOG release notes install the same ref", () => {
-    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    const section = sectionOf("1.0.0");
     expect(section).toMatch(/uses: Laughing-Man-Studios\/FreeReview@v1\b/);
   });
 });
@@ -117,20 +143,69 @@ describe("release notes resolve from the changelog", () => {
   it("states the fallback chain weakness in the release notes", () => {
     // This is the most important thing a prospective user should read, and it is
     // the thing a security-adjacent project is most tempted to omit.
-    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    const section = sectionOf("1.0.0");
     expect(flat(section)).toMatch(/resists prompt injection/i);
     expect(flat(section)).toMatch(/suppress findings/i);
     expect(flat(section)).toMatch(/largest open weakness/i);
   });
 
   it("states that redaction is not a substitute for rotating a key", () => {
-    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    const section = sectionOf("1.0.0");
     expect(flat(section)).toMatch(/rotating a leaked key/i);
   });
 
   it("states that reviews are advisory and cover changed lines only", () => {
-    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    const section = sectionOf("1.0.0");
     expect(section).toMatch(/never blocks a merge|does not block/i);
     expect(flat(section)).toMatch(/changed lines only/i);
+  });
+});
+
+describe("version sections are real boundaries", () => {
+  // The regression this exists for: the 1.0.0 assertions used to slice from
+  // `## [1.0.0]` to `## [Unreleased]`, which is only a section boundary while
+  // 1.0.0 is the newest version. Adding 1.0.1 made that range swallow the whole
+  // of 1.0.1, and the 1.0.0 tests still passed — they were asserting against a
+  // merged blob. A caveat deleted from one version would have gone unnoticed for
+  // as long as a later version restated it.
+  it("does not let one version's section contain another's heading", () => {
+    for (const version of ["1.0.0", "1.0.1"]) {
+      for (const other of ["1.0.0", "1.0.1"]) {
+        if (version === other) continue;
+        expect(sectionOf(version)).not.toMatch(new RegExp(`^## \\[?${other}\\]?`, "m"));
+      }
+    }
+  });
+
+  it("returns an empty string for a version with no section, rather than the whole file", () => {
+    // The failure mode this rules out is a typo'd version silently matching the
+    // entire changelog, which would make every assertion on it vacuously true.
+    expect(sectionOf("9.9.9")).toBe("");
+  });
+});
+
+describe("the 1.0.1 notes describe what 1.0.1 is", () => {
+  it("says the shipped behaviour is unchanged", () => {
+    // A metadata-only release that read like a behaviour change would send people
+    // looking for a regression that does not exist — or, worse, hide one.
+    const section = sectionOf("1.0.1");
+    expect(section.length).toBeGreaterThan(0);
+    expect(flat(section)).toMatch(/no change to review behaviour/i);
+  });
+
+  it("restates the injection weakness rather than assuming the reader has v1.0.0", () => {
+    // Someone installing from 1.0.1 has not read 1.0.0. The single most
+    // important limitation cannot be inherited by reference.
+    const section = flat(sectionOf("1.0.1"));
+    expect(section).toMatch(/resists prompt injection/i);
+    expect(section).toMatch(/largest open weakness/i);
+    expect(section).toMatch(/steered by the code under review/i);
+  });
+
+  it("records the Marketplace metadata change and that it cannot break installs", () => {
+    const section = flat(sectionOf("1.0.1"));
+    expect(section).toMatch(/Free Review Action/);
+    expect(section).toMatch(/display metadata only/i);
+    expect(section).toMatch(/@v1` is unaffected/i);
   });
 });
