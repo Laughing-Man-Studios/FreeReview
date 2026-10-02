@@ -16,19 +16,107 @@ To cut a release:
 
 1. Add a `## [x.y.z]` section to this file, above `[Unreleased]`.
 2. Run the **Release** workflow with `version: x.y.z`. Use `dry_run: true` first
-   to confirm the version, the tag, and the assembled notes without publishing.
+   to confirm the version, the tag, the assembled notes, and whether the moving
+   major ref already exists — without publishing anything.
+3. Confirm the result by running the **consumer-smoke** workflow against the
+   moving ref (`ref: v1`) and opening the pull request it reports.
 
 The workflow rebuilds, verifies the committed `dist/` matches source, re-runs the
-security assertions against the bundle, tags, and publishes. It refuses to
-publish if any of that fails.
+security assertions against the bundle, tags, publishes, and then **moves the
+`vX` branch** and verifies that ref resolves and carries a loadable `action.yml`.
+It refuses to complete if any of that fails.
 
-> **Pre-release.** No tagged release has been published yet. The action is
-> under active development and is **not yet published to the GitHub
-> Marketplace**. Phases 0–6 of 8 are complete and verified live against a real
-> repository on 2026-09-29; the action does review pull requests end to end.
-> Phases 7–8 — a scored evaluation against a golden dataset, and hardening plus
-> the first tagged release — remain. See
-> [`docs/execution-plan.md`](docs/execution-plan.md).
+The moving `vX` branch is what makes `uses: Laughing-Man-Studios/FreeReview@v1`
+work. A tag alone does not satisfy `@v1`, and cutting `v1.0.0` without the
+branch would leave the documented install broken while the release looked
+successful. Subversion bumps work by re-pointing the branch: cutting `v1.4.0`
+moves `v1` forward and consumers on `@v1` receive it.
+
+> **Marketplace.** Not yet published to the GitHub Marketplace. The action works
+> from any repository via `uses: Laughing-Man-Studios/FreeReview@v1`.
+
+## [1.0.0] — 2026-10-01
+
+First stable release. Installs as `uses: Laughing-Man-Studios/FreeReview@v1`.
+
+FreeReview reviews pull requests using only free OpenRouter model endpoints. It
+costs $0, never approves or requests changes, never blocks a merge, and never
+fails a workflow because a finding exists.
+
+### How it works
+
+A model **proposes** findings. Deterministic local code decides whether each one
+can be anchored to exactly one verified location in the diff, and either publishes
+it or discards it. A model cannot influence where a comment lands — only whether
+it proposes something, and in what words.
+
+That separation is the point. A finding anchored to a plausible but wrong line is
+worse than no finding, because it is a confident claim about specific code.
+
+### What is measured, not assumed
+
+- **Model capability is probed, not read from metadata.** OpenRouter's
+  `supported_parameters` is a union across endpoints and can be stale; one model
+  advertised a capability that returned 404 on every request. Modes are chosen by
+  measuring review quality in each working mode, not by taking the strongest one
+  advertised — the same model can score 0.87 in one mode and 0.47 in another.
+- **Prompt injection is measured.** Fixtures plant a suppression instruction
+  directly above a real defect, so the only way to pass is to ignore the
+  instruction. The default model resists; **the fallbacks do not** — see below.
+- **Variance is measured.** Repeated identical runs vary by ±0.13 to ±0.26
+  recall, which is wider than the gap between models. Single-run comparisons are
+  reported as noise rather than rankings.
+
+### Security
+
+- **Three independent paid-routing guards**, each with a test that fails if
+  removed. `provider.max_price` is pinned to zero, which OpenRouter *enforces* by
+  refusing to route rather than by us asking nicely.
+- **Credential redaction.** A finding about a hardcoded secret no longer
+  republishes the secret — in the explanation, the quoted source, or the
+  `suggestion` block, where accepting it would write the secret into the branch.
+- **Zero-data-retention by default.** `strict` sends `zdr: true` and
+  `data_collection: "deny"`. The optional `strict_providers` input additionally
+  pins `provider.only`, so a provider attached to a model after verification
+  cannot be selected.
+- **Fork and external-contribution PRs are skipped before any code leaves the
+  runner.** Provenance is decided by `head.repo.full_name`, never by branch names,
+  which are attacker-controlled.
+- **A run that reviewed nothing never reports "found nothing."** The two are
+  opposites, and a reader who cannot tell them apart will treat a routing failure
+  as a clean review.
+
+### Known limitations
+
+Read these before installing. They are stated plainly because a tool that hides
+them is worse than one that does not have them.
+
+- **Only the default model resists prompt injection.** The fallbacks have all
+  been measured complying with suppression instructions written into a diff. If
+  the primary is rate-limited and a review falls through, **a pull request author
+  can suppress findings by adding a comment to their own diff.** Reviews produced
+  by a fallback disclose this in the review body, which makes the risk visible
+  rather than silent — but it does not prevent it. This is the largest open
+  weakness in the project.
+- **Free models miss real defects.** Measured recall on a held-out dataset was
+  7/8 for the default model. A clean review is a lower bound, not a guarantee.
+- **Reviews cover changed lines only.** Unchanged context is never commented on,
+  by design.
+- **Credentials with no recognisable shape are not redacted.** Vendor-prefixed
+  keys, AWS key ids, GitHub/Slack/Google/SendGrid tokens, JWTs, PEM headers and
+  credential assignments are. A high-entropy blob with no prefix is not.
+  Redaction reduces the blast radius of an echoed secret; rotating a leaked key is
+  still the only fix.
+- **Private repositories only.** A public repository is skipped entirely.
+
+### Verified
+
+Live against a real repository: end-to-end review with correctly anchored inline
+comments; injection and formatting-only diffs correctly producing nothing; an
+oversized pull request refused at zero requests spent. A tagged release was
+installed from a clean consumer repository and found and anchored a real defect.
+Every Definition-of-Done item in [`docs/execution-plan.md`](docs/execution-plan.md)
+is verified by a test.
 
 ## [Unreleased]
 
@@ -127,4 +215,5 @@ publish if any of that fails.
   `no_findings`, which would tell a developer their code was clean when it had
   never been examined.
 
-[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v0.0.0...HEAD
+[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v0.1.0...v1.0.0

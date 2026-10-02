@@ -86,7 +86,11 @@ jobs:
 
           echo "version=${NORMALISED}" >> "$GITHUB_OUTPUT"
           echo "tag=v${NORMALISED}" >> "$GITHUB_OUTPUT"
-          echo "Releasing v${NORMALISED}"
+          # The major is what the moving ref is named. Extracted from the validated
+          # normalised version, never from the raw input, so `v1.0.0`, `1.0.0` and
+          # `01.0.0` all resolve the same way.
+          echo "major=${NORMALISED%%.*}" >> "$GITHUB_OUTPUT"
+          echo "Releasing v${NORMALISED} (moving ref will be 'v${NORMALISED%%.*}')"
 
       # --- 2. The artifact must be built from this exact source -------------
       # Rebuilding and comparing catches "source fixed, dist stale": a release
@@ -174,16 +178,47 @@ jobs:
 
       - name: Dry run summary
         if: ${{ inputs.dry_run }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          MAJOR: ${{ steps.version.outputs.major }}
         run: |
+          set -euo pipefail
+          # States what the real run would do to the moving ref, including whether
+          # it already exists. A dry run that does not mention the ref at all is a
+          # dry run that cannot catch the mistake this step was added for.
+          REF="v${MAJOR}"
+          if git ls-remote --exit-code origin "refs/heads/${REF}" >/dev/null 2>&1; then
+            CURRENT=$(git ls-remote origin "refs/heads/${REF}" | cut -c1-12)
+            REF_STATE="${REF} exists at ${CURRENT} and would be force-updated"
+          else
+            REF_STATE="${REF} does not exist yet and would be created"
+          fi
+
           {
             echo "## Dry run — nothing was tagged or published"
             echo
-            echo "- Tag: \`${{ steps.version.outputs.tag }}\`"
+            echo "- Tag: \`${TAG}\`"
             echo "- Commit: $(git rev-parse --short HEAD)"
+            echo "- Moving ref: ${REF_STATE}"
+            echo
+            echo "The README and the Marketplace listing install \`@${REF}\`. A tag alone does"
+            echo "not satisfy that; the ref above is what makes the documented install work."
             echo
             echo "### Notes"
             cat /tmp/notes.md
           } >> "$GITHUB_STEP_SUMMARY"
+
+          {
+            echo "### Dry run"
+            echo
+            echo "- Tag: \`${TAG}\`"
+            echo "- Moving ref: ${REF_STATE}"
+            echo
+            echo "Nothing was tagged, no release was published, and \`${REF}\` was not moved."
+            echo
+            echo "### Notes"
+            cat /tmp/notes.md
+          } >> "$GITHUB_STEP_OUTPUT" 2>/dev/null || true
 
       # --- 5. Tag and publish ----------------------------------------------
       - name: Tag and publish
@@ -216,3 +251,97 @@ jobs:
 
           echo "::notice::Published ${TAG}"
           echo "review_url=https://github.com/${GITHUB_REPOSITORY}/releases/tag/${TAG}" >> "$GITHUB_OUTPUT"
+
+      # --- 6. Move the major-version ref -----------------------------------
+      # Why this step exists
+      #
+      # The README and the Marketplace listing both instruct consumers to install
+      # `uses: Laughing-Man-Studios/FreeReview@v1`. GitHub resolves `@v1` against a
+      # ref of that name, and cutting `v1.0.0` alone does NOT create one — so without
+      # this step the documented installation is broken while the release looks
+      # successful. That is the worst possible shape: green release, unusable
+      # install instructions.
+      #
+      # It is a branch rather than a tag because tags are conventionally immutable
+      # and this ref has to move on every 1.x release. A moving branch is also what
+      # GitHub's own documentation recommends for exactly this case.
+      #
+      # Only the major is maintained. Cutting `v2.0.0` creates `v2` and leaves `v1`
+      # alone, so a consumer pinned to v1 keeps getting the last 1.x — which is the
+      # entire point of a moving major ref.
+      - name: Move the major-version ref
+        if: ${{ !inputs.dry_run }}
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+          MAJOR: ${{ steps.version.outputs.major }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          MAJOR_REF="v${MAJOR}"
+
+          # Point the ref at the commit that was just released, not at main. If
+          # main has moved since, the ref must not silently advance to unreleased
+          # work — that is the whole failure mode a pinned install protects against.
+          COMMIT=$(git rev-parse "${TAG}^{commit}")
+
+          git push --force origin "${COMMIT}:refs/heads/${MAJOR_REF}"
+          echo "::notice::${MAJOR_REF} now points at ${COMMIT}"
+
+      # The consumer-facing check, after the ref moves. Resolves the same ref the
+      # README tells people to install, so a broken instruction fails the release
+      # rather than the first person who follows it.
+      - name: Verify the major ref resolves
+        if: ${{ !inputs.dry_run }}
+        env:
+          MAJOR: ${{ steps.version.outputs.major }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          MAJOR_REF="v${MAJOR}"
+
+          RESOLVED=$(git ls-remote origin "refs/heads/${MAJOR_REF}" | cut -f1)
+          if [ -z "${RESOLVED}" ]; then
+            echo "::error::${MAJOR_REF} does not resolve. 'uses: Laughing-Man-Studios/FreeReview@${MAJOR_REF}' would fail at load time for every consumer."
+            exit 1
+          fi
+
+          # A ref can resolve and still be unusable, so check what a consumer
+          # actually gets: an action.yml with a `runs` block on the runtime we
+          # declare. Read from the fetched ref, never from the working tree —
+          # the working tree is this commit, which is what we *just* verified, so
+          # checking it would prove nothing about the ref.
+          WORK=$(mktemp -d)
+          trap 'rm -rf "${WORK}"' EXIT
+          git fetch --no-tags --depth 1 origin "${MAJOR_REF}"
+          git show "FETCH_HEAD:action.yml" > "${WORK}/action.yml" 2>/dev/null || {
+            echo "::error::${MAJOR_REF} has no action.yml at its tip."
+            exit 1
+          }
+
+          grep -q '^runs:' "${WORK}/action.yml" || {
+            echo "::error::action.yml at ${MAJOR_REF} has no 'runs:' block."
+            exit 1
+          }
+          grep -qE 'using: .node24.' "${WORK}/action.yml" || {
+            echo "::error::action.yml at ${MAJOR_REF} does not declare runs.using: node24."
+            exit 1
+          }
+          grep -q 'dist/index.js' "${WORK}/action.yml" || {
+            echo "::error::action.yml at ${MAJOR_REF} does not point at dist/index.js."
+            exit 1
+          }
+
+          # And that the bundle the ref points at is really there. A JavaScript
+          # action with a `runs` block and no committed bundle fails at load with
+          # no code executed, which is the worst possible failure mode.
+          git show "FETCH_HEAD:dist/index.js" > "${WORK}/index.js" 2>/dev/null || {
+            echo "::error::${MAJOR_REF} points at a commit with no dist/index.js."
+            exit 1
+          }
+          SIZE=$(wc -c < "${WORK}/index.js")
+          if [ "${SIZE}" -lt 1000 ]; then
+            echo "::error::dist/index.js at ${MAJOR_REF} is only ${SIZE} bytes."
+            exit 1
+          fi
+
+          echo "${MAJOR_REF} resolves to ${RESOLVED}, carries a loadable action.yml, and its bundle is ${SIZE} bytes"

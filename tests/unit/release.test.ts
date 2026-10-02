@@ -1,0 +1,136 @@
+/**
+ * The release path must keep the documented install working.
+ *
+ * ## The failure this guards against
+ *
+ * The README and the Marketplace listing both instruct consumers to install
+ * `uses: Laughing-Man-Studios/FreeReview@v1`. GitHub resolves `@v1` against a
+ * ref of that name — and cutting `v1.0.0` alone does **not** create one.
+ *
+ * So a release could be cut, publish cleanly, report green, and leave the
+ * documented installation broken. That is the worst shape a release failure can
+ * take: it looks successful, and it is discovered by the first person who follows
+ * the README.
+ *
+ * These tests are cheap and the invariant is load-bearing. A ref that is created
+ * once and never moved is worse than no ref: it silently pins every consumer to
+ * the first release forever, with no signal that anything is stale.
+ */
+
+import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { join } from "node:path";
+
+const read = (p: string): string => readFileSync(join(import.meta.dirname, "..", "..", p), "utf8");
+
+/** Markdown wraps, so prose claims are matched against a whitespace-collapsed copy. */
+const flat = (text: string): string => text.replace(/\s+/g, " ");
+
+const RELEASE = read(".github/workflows/release.yml");
+const CHANGELOG = read("CHANGELOG.md");
+const README = read("README.md");
+
+describe("the release maintains the major-version ref", () => {
+  it("moves it after tagging, not before", () => {
+    // Before the tag exists there is nothing to point at, and a partial order
+    // would leave a ref pointing at a commit no release covers.
+    const tagIndex = RELEASE.indexOf('gh release create');
+    const refIndex = RELEASE.indexOf("Move the major-version ref");
+    expect(tagIndex).toBeGreaterThan(-1);
+    expect(refIndex).toBeGreaterThan(tagIndex);
+  });
+
+  it("points the ref at the released commit, not at main", () => {
+    // Pointing at main would advance every consumer's install to unreleased work.
+    // That is precisely what a pinned install is supposed to prevent.
+    expect(RELEASE).toMatch(/git push --force origin "\$\{COMMIT\}:refs\/heads\/\$\{MAJOR_REF\}"/);
+    expect(RELEASE).toContain('git rev-parse "${TAG}^{commit}"');
+  });
+
+  it("derives the ref name from the validated version, never the raw input", () => {
+    // `v1.0.0`, `1.0.0` and `01.0.0` must all move the same ref. Parsing the raw
+    // input is how a release ends up publishing v1.0.0 and moving `v01`.
+    expect(RELEASE).toContain('major=${NORMALISED%%.*}');
+  });
+
+  it("verifies the ref resolves and carries a usable action", () => {
+    // A ref can resolve and still be unusable. Checking it here means a bad
+    // release fails the release rather than the first consumer.
+    expect(flat(RELEASE)).toMatch(/does not resolve/);
+    expect(flat(RELEASE)).toMatch(/has no action\.yml at its tip/);
+    expect(flat(RELEASE)).toMatch(/no dist\/index\.js/);
+  });
+
+  it("checks the ref's contents, not the working tree", () => {
+    // The working tree is the commit just verified, so reading it would prove
+    // nothing about the ref that consumers actually fetch.
+    expect(RELEASE).toContain("FETCH_HEAD:action.yml");
+  });
+
+  it("skips both ref steps on a dry run", () => {
+    expect((RELEASE.match(/if: \$\{\{ !inputs\.dry_run \}\}/g) ?? []).length).toBeGreaterThanOrEqual(2);
+  });
+
+  it("reports the ref state in the dry-run summary", () => {
+    // A dry run that does not mention the ref cannot catch this mistake, which is
+    // the only reason anyone runs a dry run.
+    expect(flat(RELEASE)).toMatch(/Moving ref/);
+    expect(flat(RELEASE)).toMatch(/would be force-updated|would be created/);
+  });
+});
+
+describe("subversion bumps work by re-pointing the ref", () => {
+  it("documents that cutting 1.x moves v1", () => {
+    expect(flat(CHANGELOG)).toMatch(/Subversion bumps work by re-pointing the branch/);
+  });
+
+  it("documents that a tag alone does not satisfy @v1", () => {
+    expect(flat(CHANGELOG)).toMatch(/A tag alone does not satisfy `@v1`/);
+  });
+
+  it("says the workflow verifies the ref after moving it", () => {
+    expect(flat(CHANGELOG)).toMatch(/moves the `vX` branch/);
+  });
+});
+
+describe("the documented install matches what the release produces", () => {
+  it("the README installs a major ref the release actually maintains", () => {
+    // If the README pinned `v1.0.0` this would also pass, so the assertion is
+    // specifically that it is the bare major.
+    expect(README).toMatch(/uses: Laughing-Man-Studios\/FreeReview@v1\b/);
+  });
+
+  it("the CHANGELOG release notes install the same ref", () => {
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    expect(section).toMatch(/uses: Laughing-Man-Studios\/FreeReview@v1\b/);
+  });
+});
+
+describe("release notes resolve from the changelog", () => {
+  it("has a section for the version being released", () => {
+    // The workflow slices `## [x.y.z]` out of CHANGELOG.md. A missing section
+    // does not fail the release — it falls back to a placeholder, so the failure
+    // is invisible and the published notes say "_No CHANGELOG.md section found_".
+    expect(CHANGELOG).toMatch(/^## \[1\.0\.0\]/m);
+  });
+
+  it("states the fallback chain weakness in the release notes", () => {
+    // This is the most important thing a prospective user should read, and it is
+    // the thing a security-adjacent project is most tempted to omit.
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    expect(flat(section)).toMatch(/resists prompt injection/i);
+    expect(flat(section)).toMatch(/suppress findings/i);
+    expect(flat(section)).toMatch(/largest open weakness/i);
+  });
+
+  it("states that redaction is not a substitute for rotating a key", () => {
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    expect(flat(section)).toMatch(/rotating a leaked key/i);
+  });
+
+  it("states that reviews are advisory and cover changed lines only", () => {
+    const section = CHANGELOG.slice(CHANGELOG.indexOf("## [1.0.0]"), CHANGELOG.indexOf("## [Unreleased]"));
+    expect(section).toMatch(/never blocks a merge|does not block/i);
+    expect(flat(section)).toMatch(/changed lines only/i);
+  });
+});
