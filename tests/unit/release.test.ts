@@ -43,12 +43,19 @@ const README = read("README.md");
  */
 const sectionOf = (version: string): string => {
   const lines = CHANGELOG.split("\n");
-  const escaped = version.replace(/[.\-]/g, "\\$&");
+  // `[.-]` not `[.\-]`: this helper is copied from the same algorithm embedded in
+  // release.yml's shell block, where the doubled backslash is consumed by the
+  // shell. In a plain module there is no shell layer, so the escape is just
+  // noise that `no-useless-escape` rejects.
+  const escaped = version.replace(/[.-]/g, "\\$&");
   const start = lines.findIndex((l) => new RegExp(`^## \\[?${escaped}\\]?`).test(l));
   if (start === -1) return "";
   let end = lines.length;
   for (let i = start + 1; i < lines.length; i++) {
-    if (/^## /.test(lines[i])) {
+    // `lines[i]` is `string | undefined` under noUncheckedIndexedAccess, even
+    // though the bound provably keeps it in range. The regex tolerates undefined
+    // by stringifying it, so this is a type assertion, not a runtime guard.
+    if (/^## /.test(lines[i] as string)) {
       end = i;
       break;
     }
