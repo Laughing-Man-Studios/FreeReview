@@ -208,17 +208,7 @@ jobs:
             cat /tmp/notes.md
           } >> "$GITHUB_STEP_SUMMARY"
 
-          {
-            echo "### Dry run"
-            echo
-            echo "- Tag: \`${TAG}\`"
-            echo "- Moving ref: ${REF_STATE}"
-            echo
-            echo "Nothing was tagged, no release was published, and \`${REF}\` was not moved."
-            echo
-            echo "### Notes"
-            cat /tmp/notes.md
-          } >> "$GITHUB_STEP_OUTPUT" 2>/dev/null || true
+          echo "Dry run complete. Nothing was tagged, no release was published, and ${REF} was not moved."
 
       # --- 5. Tag and publish ----------------------------------------------
       - name: Tag and publish
