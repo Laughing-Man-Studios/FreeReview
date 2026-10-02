@@ -52,18 +52,68 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
           git checkout -B "$BRANCH"
-          git commit --allow-empty -m "test: exercise FreeReview@$REF on a clean diff"
+
+          # Writes the probe workflow itself, pinned to the requested ref.
+          #
+          # Two reasons, and the second is the important one:
+          #
+          #  1. The probe is path-filtered to fire only when this file changes, so
+          #     without writing it the probe never runs at all. It has never run.
+          #  2. Writing it *here* is what pins the ref under test. A probe file
+          #     committed to the branch by hand gets clobbered by the next run,
+          #     because this workflow force-pushes the branch from main.
+          #
+          # Together these mean the ref under test can never drift from the ref
+          # actually exercised.
+          mkdir -p .github/workflows
+          cat > .github/workflows/consumer-smoke-probe.yml <<'PROBE'
+          name: probe
+          on:
+            pull_request:
+              paths: [".github/workflows/consumer-smoke-probe.yml"]
+
+          permissions:
+            contents: read
+            pull-requests: write
+
+          jobs:
+            review:
+              runs-on: ubuntu-latest
+              steps:
+                - uses: Laughing-Man-Studios/FreeReview@__REF__
+                  with:
+                    openrouter_api_key: ${{ secrets.OPENROUTER_API_KEY }}
+                    github_token: ${{ github.token }}
+          PROBE
+          sed -i "s|@__REF__|@${REF}|" .github/workflows/consumer-smoke-probe.yml
+
+          # A real file with a real defect. An empty commit exercises the
+          # "nothing to review" path instead, which proves much less: the review
+          # then correctly finds nothing, and a broken run looks like a pass.
+          mkdir -p src
+          cat > src/consumer-smoke-probe.ts <<'SRC'
+          export function percentile(values: number[], p: number): number {
+            if (!values) {
+              return 0;
+            }
+            const sorted = [...values].sort((a, b) => a - b);
+            return sorted[Math.floor(p * sorted.length)];
+          }
+          SRC
+
+          git add .github/workflows/consumer-smoke-probe.yml src/consumer-smoke-probe.ts
+          git commit -m "test: exercise FreeReview@${REF} on a clean diff"
 
           PUSHED=0
           if git push --force origin "$BRANCH"; then PUSHED=1; fi
+
           # The branch may already exist from a previous run, in which case a PR may
           # already be open against it.
           if [ "$PUSHED" = "0" ]; then
             EXISTING=$(gh pr list --head "$BRANCH" --state open --json number --jq '.[0].number // empty')
             if [ -n "$EXISTING" ]; then
-              echo "Reusing pull request #$EXISTING from a previous run."
-              echo "number=$EXISTING" >> "$GITHUB_OUTPUT"
-              exit 0
+              echo "::error::could not push the probe branch and no open pull request exists"
+              exit 1
             fi
             echo "::error::could not push the probe branch and no open pull request exists"
             exit 1
