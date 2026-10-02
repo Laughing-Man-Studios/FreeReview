@@ -107,8 +107,21 @@ jobs:
           fi
           echo "Pull request #$PR_NUMBER found."
 
+          # Reviews and issue comments are DIFFERENT GitHub endpoints, and FreeReview
+          # posts a review. Querying only /issues/N/comments finds nothing for a
+          # successful run — it polls for ten minutes and reports a failure that is
+          # actually its own bug.
+          #
+          # Both are checked because a degraded run with no placeable findings
+          # publishes a summary-only review, and any future path that used an issue
+          # comment should not silently break this check again.
           for _ in $(seq 1 40); do
-            BODY=$(gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" --jq '[.[] | select(.user.type=="Bot") | .body] | join("\n---\n")')
+            BODY=$(
+              gh api "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/reviews" \
+                --jq '[.[] | select(.user.type=="Bot") | .body] | join("\n---\n")' 2>/dev/null || true
+              gh api "repos/$GITHUB_REPOSITORY/issues/$PR_NUMBER/comments" \
+                --jq '[.[] | select(.user.type=="Bot") | .body] | join("\n---\n")' 2>/dev/null || true
+            )
             if printf '%s' "$BODY" | grep -q "FreeReview"; then
               echo "found=true" >> "$GITHUB_OUTPUT"
               echo "Review comment:"; printf '%s\n' "$BODY" | head -40
@@ -128,7 +141,7 @@ jobs:
             echo
             if [ "$FOUND" = "true" ]; then
               echo "The action installed from \`${{ inputs.ref }}\`, ran on a pull request"
-              echo "this repository did not author, and published a review."
+              echo "this repository did not author, and published a review on #${{ steps.wait.outputs.pr }}."
               echo
               echo "This is the Phase 8 exit criterion: a tagged release installs and runs."
             else
