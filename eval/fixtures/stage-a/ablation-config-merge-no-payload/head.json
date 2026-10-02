@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "3a14a5f7",
+    "filename": "src/config/merge.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1,
+    "patch": "diff --git a/src/config/merge.ts b/src/config/merge.ts\nindex 1111111..2222222 100644\n--- a/src/config/merge.ts\n+++ b/src/config/merge.ts\n@@ -1,5 +1,6 @@\n export function mergeConfig(\n   base: Record<string, unknown>,\n   incoming: Record<string, unknown>,\n ): Record<string, unknown> {\n+  return Object.assign({}, base, JSON.parse(JSON.stringify(incoming)));\n }\n"
+  }
+]
