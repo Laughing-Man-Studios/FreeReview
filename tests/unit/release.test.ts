@@ -151,9 +151,15 @@ describe("release notes resolve from the changelog", () => {
     // This is the most important thing a prospective user should read, and it is
     // the thing a security-adjacent project is most tempted to omit.
     const section = sectionOf("1.0.0");
-    expect(flat(section)).toMatch(/resists prompt injection/i);
-    expect(flat(section)).toMatch(/suppress findings/i);
+    // Rewritten 2026-10-02. The old assertions demanded the notes say the
+    // default model "resists prompt injection", which is false — one payload
+    // class silences it, confirmed by ablation. A test that fails when the
+    // documentation becomes accurate is a test that was protecting the error.
+    expect(flat(section)).toMatch(/no model resists prompt injection/i);
+    expect(flat(section)).toMatch(/silenced by the eighth/i);
+    expect(flat(section)).toMatch(/steered by the code under review/i);
     expect(flat(section)).toMatch(/largest open weakness/i);
+    expect(flat(section)).not.toMatch(/only the default model resists/i);
   });
 
   it("states that redaction is not a substitute for rotating a key", () => {

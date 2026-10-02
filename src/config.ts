@@ -69,11 +69,32 @@ export interface ModelDefinition {
    *                  from `resistant`, which is the failure this project exists to
    *                  prevent.
    *
-   * This is why there is a fallback chain but no injection-resistant fallback:
-   * only the primary has ever been measured resistant, so a review that falls
-   * through is one a pull request author could have suppressed with a comment.
+   * ## A fourth state, added 2026-10-02
+   *
+   * `partially-exposed` — resisted most payload classes tested, and was silenced
+   * by at least one, with the silencing confirmed by an ablation control rather
+   * than inferred from a single absence.
+   *
+   * It exists because the primary was `resistant` on the strength of two payloads
+   * of a single shape, and widening the set to eight payload classes found a
+   * suppression string — disguised as a configuration value — that silences it
+   * completely. Under the three-state model the only options were to call that
+   * `resistant`, which is false, or `exposed`, which is true but throws away the
+   * fact that it resisted six of eight and remains by far the best model
+   * available. Neither option is the measurement.
+   *
+   * The distinction is not cosmetic. `resistant` emits **no disclosure at all**,
+   * so a `resistant` model publishes a review that presents as clean. That is
+   * only defensible while the claim holds. Once one payload defeats it, silence
+   * becomes the misleading option — and because the primary is the default path,
+   * the one making the overstated claim would be the one almost every user sees.
+   *
+   * This is also why there is a fallback chain but no injection-resistant
+   * fallback: only the primary has ever been the least exposed, so a review that
+   * falls through is one a pull request author could have suppressed with a
+   * comment.
    */
-  readonly injectionResistance?: "resistant" | "exposed" | "unmeasured";
+  readonly injectionResistance?: "resistant" | "partially-exposed" | "exposed" | "unmeasured";
   /**
    * Last manually-verified endpoint privacy posture. NOT queryable at runtime
    * (the endpoints API is management-key only), so this is a maintenance-time
@@ -135,7 +156,7 @@ export const DEFAULT_MODELS: readonly ModelDefinition[] = [
     // Measured best PROMPT_JSON: only mode that serves; recall 1.00, 0 FP, 0/2 injection
     preferredMode: "PROMPT_JSON",
     // Measured 0/2 injection fixtures across 5 observations, incl. 3 repeated passes
-    injectionResistance: "resistant",},
+    injectionResistance: "partially-exposed",},
   {
     // `structured_outputs` is advertised in OpenRouter's `supported_parameters`
     // but does NOT work: a STRUCTURED request returns 404 "No endpoints found

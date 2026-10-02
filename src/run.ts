@@ -829,7 +829,9 @@ export async function run(env: NodeJS.ProcessEnv = process.env): Promise<RunOutp
     failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null,
     // Derived from which models actually answered, not from which were configured.
     // A run that fell through to a fallback must disclose the fallback's exposure
-    // even though the primary is the only model ever measured resistant.
+    // even though the primary is the least exposed. Since 2026-10-02 the primary
+    // discloses too — no model has been measured resistant, so nothing publishes
+    // a silent review.
     injectionNote,
   });
 

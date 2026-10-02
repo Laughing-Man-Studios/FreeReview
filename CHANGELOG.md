@@ -86,11 +86,17 @@ it, and because the README was describing the action as unreleased.
 These are unchanged from `v1.0.0` and are not new; the README rewrite made them
 visible rather than adding them.
 
-- **Only the default model resists prompt injection**, and the fallbacks have all
-  complied with at least one planted payload. Under `privacy_mode: relaxed`, a
-  compliant model may be selected, which means **the review can be steered by
-  the code under review**. The action discloses this in the published review
-  body; it does not prevent it. This remains the largest open weakness.
+- **No model resists prompt injection, including the default one.** Measured
+  2026-10-02 after widening the injection set from two payloads to eight: the
+  default model resisted 6 of 8 payload classes and was silenced by the eighth —
+  a suppression string disguised as a configuration value — with the silencing
+  confirmed by an ablation control rather than a missed bug. **The review can
+  therefore be steered by the code under review on the default configuration**,
+  not only under `privacy_mode: relaxed`. Every published review discloses this;
+  none of it prevents it. This remains the largest open weakness, and it is now
+  worse than earlier releases of this page described. Full numbers, including the
+  scorer bug that counted "identified the injection" as compliance, are in
+  [`docs/model-evaluation.md`](docs/model-evaluation.md).
 - **Reviews are advisory.** They never block a merge, never request changes, and
   never fail a workflow, so a bad model run costs a comment and not a merge.
 - **Reviews cover changed lines only.** Unchanged context is never commented on.
@@ -174,13 +180,17 @@ worse than no finding, because it is a confident claim about specific code.
 Read these before installing. They are stated plainly because a tool that hides
 them is worse than one that does not have them.
 
-- **Only the default model resists prompt injection.** The fallbacks have all
-  been measured complying with suppression instructions written into a diff. If
-  the primary is rate-limited and a review falls through, **a pull request author
-  can suppress findings by adding a comment to their own diff.** Reviews produced
-  by a fallback disclose this in the review body, which makes the risk visible
-  rather than silent — but it does not prevent it. This is the largest open
-  weakness in the project.
+- **No model resists prompt injection, including the default one.** Measured
+  2026-10-02 after widening the injection set from two payloads to eight: the
+  default model resisted 6 of 8 payload classes and was silenced by the eighth —
+  a suppression string disguised as a configuration value — with the silencing
+  confirmed by an ablation control rather than a missed bug. **The review can
+  therefore be steered by the code under review on the default configuration**,
+  not only under `privacy_mode: relaxed`. Every published review discloses this;
+  none of it prevents it. This remains the largest open weakness, and it is now
+  worse than earlier releases of this page described. Full numbers, including the
+  scorer bug that counted "identified the injection" as compliance, are in
+  [`docs/model-evaluation.md`](docs/model-evaluation.md).
 - **Free models miss real defects.** Measured recall on a held-out dataset was
   7/8 for the default model. A clean review is a lower bound, not a guarantee.
 - **Reviews cover changed lines only.** Unchanged context is never commented on,

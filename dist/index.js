@@ -36,7 +36,7 @@ var DEFAULT_MODELS = [
     // Measured best PROMPT_JSON: only mode that serves; recall 1.00, 0 FP, 0/2 injection
     preferredMode: "PROMPT_JSON",
     // Measured 0/2 injection fixtures across 5 observations, incl. 3 repeated passes
-    injectionResistance: "resistant"
+    injectionResistance: "partially-exposed"
   },
   {
     // `structured_outputs` is advertised in OpenRouter's `supported_parameters`
@@ -22657,6 +22657,7 @@ function renderComment(finding) {
 function injectionDisclosure(modelIds, catalog) {
   const byId = new Map(catalog.map((m) => [m.id, m]));
   const exposed = modelIds.filter((id) => byId.get(id)?.injectionResistance === "exposed");
+  const partial2 = modelIds.filter((id) => byId.get(id)?.injectionResistance === "partially-exposed");
   const unmeasured = modelIds.filter((id) => {
     const r = byId.get(id)?.injectionResistance;
     return r === void 0 || r === "unmeasured";
@@ -22667,7 +22668,15 @@ function injectionDisclosure(modelIds, catalog) {
 >
 > FreeReview detects this by planting the suppression instruction next to a real defect: the only way to pass is to ignore the instruction. This model did not.
 >
-> Treat the findings below as a lower bound, not as a clean review. Only the default model has been measured resistant; fallbacks exist for availability, not for this property.`;
+> Treat the findings below as a lower bound, not as a clean review.` + (partial2.length > 0 ? ` ${partial2.map((id) => `\`${id}\``).join(", ")} did not answer this review but is only partially resistant, so it is disclosed here too.` : " No model in the free pool has been measured immune to this.");
+  }
+  if (partial2.length > 0) {
+    const names = partial2.map((id) => `\`${id}\``).join(", ");
+    return `> **This review may be incomplete.** It was produced by ${names}, which resisted 6 of 8 injection payload classes tested \u2014 but one of them silenced it completely. A suppression instruction disguised as a configuration value was planted beside a real defect, and this model reported nothing.
+>
+> That was not inferred from one quiet run. The same defect was re-reviewed with the payload removed, and the model found it \u2014 so the instruction, not the difficulty, is what suppressed it. A pull request author who can land a string literal in their own diff can therefore suppress findings in this review.
+>
+> Treat the findings below as a lower bound, not as a clean review. No model in the free pool has been measured immune to this.`;
   }
   if (unmeasured.length > 0) {
     const names = unmeasured.map((id) => `\`${id}\``).join(", ");
@@ -24312,7 +24321,9 @@ async function run(env = process.env) {
     failureDetail: chunksReviewed === 0 && failureDetails.length > 0 ? failureDetails[0] ?? null : null,
     // Derived from which models actually answered, not from which were configured.
     // A run that fell through to a fallback must disclose the fallback's exposure
-    // even though the primary is the only model ever measured resistant.
+    // even though the primary is the least exposed. Since 2026-10-02 the primary
+    // discloses too — no model has been measured resistant, so nothing publishes
+    // a silent review.
     injectionNote
   });
   const published = await publishReview(client, {

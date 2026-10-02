@@ -82,11 +82,13 @@ describe("the README documents credential redaction", () => {
 });
 
 describe("the README states the open weakness rather than implying completeness", () => {
-  it("says the fallback chain has no injection-resistant model", () => {
+  it("says no model is injection-resistant, and does not confine it to the fallback chain", () => {
     // The single most important thing a prospective user should know, and the
-    // thing a project with this premise is most tempted to bury.
-    expect(README).toMatch(/fallback chain/i);
+    // thing a project with this premise is most tempted to bury. Scoped to the
+    // fallback chain it is now understating the problem: the default path is
+    // affected too.
     expect(flat(README)).toMatch(/largest open weakness/i);
+    expect(flat(README)).toMatch(/no longer confined to\s*the fallback chain/i);
   });
 
   it("does not claim Phase 8 closed it", () => {
@@ -132,9 +134,30 @@ describe("the README model table matches the catalog", () => {
     expect(README).toMatch(/eligib/i);
   });
 
-  it("discloses that the primary is the only injection-resistant model", () => {
-    expect(flat(README)).toMatch(/only model that has never followed instructions/i);
+  it("discloses that no model is injection-resistant, primary included", () => {
+    // Rewritten 2026-10-02. This asserted the opposite of the current truth —
+    // that the primary "has never followed instructions" — on the strength of a
+    // `0 / 2` measured across two payloads of one shape. Widening to eight
+    // payload classes found one that silences it, confirmed by ablation.
+    //
+    // The guard now asserts the weaker-looking claim on purpose. "No model is
+    // immune" is the statement a user can act on; a future measurement could
+    // earn one back, and this test should fail loudly when that happens rather
+    // than be quietly relaxed.
+    expect(flat(README)).toMatch(/no model here is immune/i);
+    expect(flat(README)).toMatch(/6 of 8/);
+    // And it must not still carry the superseded claim anywhere.
+    expect(flat(README)).not.toMatch(/only model that has never followed instructions/i);
+    expect(README).not.toMatch(/\*\*resistant\*\* \(0\/2/);
     expect(README).toMatch(/disclose/i);
+  });
+
+  it("says the default path itself is steerable, not only relaxed mode", () => {
+    // The superseded framing made suppression conditional on rate-limiting or on
+    // opting into `privacy_mode: relaxed`. It is neither: one payload class
+    // silences the primary outright.
+    expect(flat(README)).toMatch(/default configuration/i);
+    expect(flat(README)).toMatch(/suppress findings in their own/i);
   });
 
   it("does not overstate the injection guarantee", () => {

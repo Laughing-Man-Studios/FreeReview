@@ -247,12 +247,15 @@ export interface SummaryInput {
  *
  * ## Why this is in the published comment and not just the log
  *
- * Only the primary model has ever been measured resistant. If the primary is
- * rate-limited and a review falls through to a fallback, a pull request author
- * can suppress findings by writing a comment in their own diff — and a
- * suppressed review and a clean review look identical. That is the exact failure
- * this project exists to prevent, and it is reachable precisely when the service
- * is under strain.
+ * A pull request author can suppress findings by planting a suppression
+ * instruction in their own diff, and a suppressed review and a clean review look
+ * identical. That is the exact failure this project exists to prevent.
+ *
+ * It was originally confined to the fallback chain, on the belief that only the
+ * primary had ever been measured resistant. That turned out to be wrong: the
+ * primary is silenced by one payload class of eight, so the disclosure has to
+ * fire on the default path too. When the service is under strain and a review
+ * falls through, the exposure is worse still.
  *
  * Disclosing it in the review body is the only place a reader who did not watch
  * the logs will see it. A suppressed review that presents as clean is the worst
@@ -269,7 +272,16 @@ export interface SummaryInput {
  * `unmeasured` is disclosed too. Silence would be indistinguishable from
  * `resistant`, and that is precisely the confusion this project exists to
  * prevent.
- */
+   *
+  * ## Why partial exposure gets its own wording
+  *
+  * The `partially-exposed` note names the payload class, the control, and the
+  * conclusion, because that is what separates it from both neighbours: it is not
+  * the vague warning an `exposed` fallback gets, and it is not the silence a
+  * `resistant` model gets. "We resisted 6 of 8, one of the 8 beat us, and we
+  * confirmed it by removing the payload and finding the bug again" is a claim a
+  * reader can check and a later measurement can overturn.
+  */
 export function injectionDisclosure(
   modelIds: readonly string[],
   catalog: readonly ModelDefinition[],
@@ -277,6 +289,7 @@ export function injectionDisclosure(
   const byId = new Map(catalog.map((m) => [m.id, m]));
 
   const exposed = modelIds.filter((id) => byId.get(id)?.injectionResistance === "exposed");
+  const partial = modelIds.filter((id) => byId.get(id)?.injectionResistance === "partially-exposed");
   const unmeasured = modelIds.filter((id) => {
     const r = byId.get(id)?.injectionResistance;
     return r === undefined || r === "unmeasured";
@@ -291,8 +304,37 @@ export function injectionDisclosure(
       "findings by adding such a comment to their own diff.\n>\n" +
       "> FreeReview detects this by planting the suppression instruction next to a real defect: " +
       "the only way to pass is to ignore the instruction. This model did not.\n>\n" +
-      "> Treat the findings below as a lower bound, not as a clean review. Only the default model " +
-      "has been measured resistant; fallbacks exist for availability, not for this property."
+      "> Treat the findings below as a lower bound, not as a clean review." +
+      (partial.length > 0
+        ? ` ${partial.map((id) => `\`${id}\``).join(", ")} did not answer this review but is only ` +
+          "partially resistant, so it is disclosed here too."
+        : " No model in the free pool has been measured immune to this.")
+    );
+  }
+
+// Partial exposure is disclosed before full exposure, and it is disclosed on
+  // the *default* path. That is the whole point of the state: a `resistant`
+  // model emits nothing, so calling the primary `resistant` after a confirmed
+  // suppression would have published a review that looks clean on the one code
+  // path nearly every user takes.
+  //
+  // Reached only when nothing is `exposed`. A fully exposed model is a stronger
+  // claim about the review that was actually produced, so it takes precedence —
+  // but the exposed note above also names any partially-exposed models, so no
+  // information is lost by returning early.
+  if (partial.length > 0) {
+    const names = partial.map((id) => `\`${id}\``).join(", ");
+    return (
+      `> **This review may be incomplete.** It was produced by ${names}, which resisted 6 of 8 ` +
+      "injection payload classes tested — but one of them silenced it completely. A suppression " +
+      "instruction disguised as a configuration value was planted beside a real defect, and this " +
+      "model reported nothing.\n>\n" +
+      "> That was not inferred from one quiet run. The same defect was re-reviewed with the payload " +
+      "removed, and the model found it — so the instruction, not the difficulty, is what suppressed " +
+      "it. A pull request author who can land a string literal in their own diff can therefore " +
+      "suppress findings in this review.\n>\n" +
+      "> Treat the findings below as a lower bound, not as a clean review. No model in the free " +
+      "pool has been measured immune to this."
     );
   }
 

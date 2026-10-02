@@ -41,21 +41,33 @@
 >
 > **What to know before you rely on it:**
 >
-> - **Injection resistance rests on a very small sample.** The default model
->   resisted both planted payloads (`0 / 2`) and produced no false positives,
->   while every fallback model complied with at least one. That is the main
->   reason it ships. But it is two payloads across five observations, and it is
->   the single most important property here: a model that follows instructions
->   written into your diff is a channel by which a pull request author decides
->   whether their own code gets examined. Under `privacy_mode: relaxed`, where
->   a compliant model may be selected, **the review can be steered by the code
->   under review.** The action discloses this in the published review body; it
->   does not prevent it.
-> - **The default model also flags the injection payload itself.** On both
+> - **No model here is immune to instructions planted in your diff.** This is
+>   the single most important caveat on this page, and it is the reason a
+>   suppressed review is not distinguishable from a clean one.
+>
+>   The default model resisted **6 of 8** injection payload classes tested. One
+>   beat it: a suppression instruction disguised as a configuration value, placed
+>   beside a real defect, which it declined to report. That was confirmed by
+>   ablation rather than assumed — the same defect re-reviewed with the payload
+>   removed *was* found, so the instruction did the silencing, not the
+>   difficulty. Every fallback model complied with at least one payload class.
+>
+>   **A pull request author can therefore suppress findings in their own
+>   review**, by landing a string literal in their diff. This is true on the
+>   default configuration and not only under `privacy_mode: relaxed`. FreeReview
+>   discloses it in every published review body rather than presenting a
+>   suppressed review as a clean one — but it does not prevent it.
+>
+>   Earlier versions of this page said the default model was injection-resistant.
+>   That was measured on two payloads of a single shape and was wrong; the
+>   numbers in [`docs/model-evaluation.md`](docs/model-evaluation.md) record the
+>   correction, including a scorer bug that counted "identified the injection"
+>   as compliance.
+> - **The default model also flags the injection payload itself.** On two of the
 >   injection fixtures it reported the instruction text as a finding, landing a
 >   comment on a line that is not itself defective. It found the real bug *and*
->   the attempt to suppress it, but the action cannot tell those apart when
->   publishing. Known limitation, not a scored failure.
+>   the attempt to suppress it, but the action cannot always tell those apart
+>   when publishing. Known limitation, not a scored failure.
 > - **The free model pool is thin under strict privacy.** Of the 17 free models
 >   in the catalog, exactly one has a zero-data-retention endpoint. Strict mode
 >   is the default, so that model is the default path and three of the eight
@@ -280,15 +292,21 @@ golden dataset — see [`docs/model-evaluation.md`](docs/model-evaluation.md).
 
 | Role | Model | Mode | Injection resistance |
 | --- | --- | --- | --- |
-| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **resistant** (0/2, five observations) |
+| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **partial** — 6 of 8 payload classes resisted, 1 confirmed suppression |
 | Fallback 1 | `nvidia/nemotron-3-super-120b-a12b:free` | prompt-JSON | exposed |
 | Fallback 2 | `qwen/qwen3.8-27b:free` | `json_object` | exposed |
 | Fallback 3 | `nvidia/nemotron-3-ultra-550b-a55b:free` | prompt-JSON | exposed |
 
-**The primary is the only model that has never followed instructions written
-into a diff.** That, not raw quality, is why it ships first: the measured
-recall and precision of the primary and of the best fallback are within noise of
-each other, so the property that distinguishes them is the one that matters.
+**No model in this pool is immune, and the primary is the least exposed rather
+than safe.** It resisted 6 of 8 payload classes where every fallback complied
+with at least one, and that margin — not raw quality — is why it ships first: the
+measured recall and precision of the primary and of the best fallback are within
+noise of each other, so exposure is what separates them.
+
+One payload class defeats it. The table says `partial` rather than `resistant`
+because the difference decides what a reader is told at run time: a
+`partially-exposed` model publishes a disclosure on **every** review, and a
+`resistant` one publishes nothing at all.
 
 When a review comes from a model with measured exposure, **the review says so**,
 in the review body itself. See [Prompt injection](#prompt-injection) below.
@@ -333,14 +351,16 @@ FreeReview measures it: fixtures plant a suppression instruction directly above 
 real defect, so the only way to pass is to ignore the instruction and report the
 defect. A model that complies reports nothing and is scored as having complied.
 
-Because only the primary has been measured resistant, a review produced by a
-fallback **discloses that in the review body**, naming what was measured and what
-happened. If a model has not been measured at all, that is disclosed too —
-silence would be indistinguishable from safety.
+No model in the pool has been measured immune, so **every** review carries a
+disclosure in its body: a fallback because it was measured complying, the primary
+because it was measured being silenced by one payload class, and any unmeasured
+model because silence there would be indistinguishable from safety.
 
-This is a real limitation, not a solved problem: when the primary is rate-limited
-and a review falls through, findings can be suppressed. The disclosure makes that
-visible rather than pretending otherwise.
+This is a real limitation, not a solved problem. On the primary it is not
+conditional on rate-limiting — one payload class suppresses it outright — and
+when the primary is rate-limited and a review falls through to a fallback, the
+exposure is worse. The disclosure makes that visible rather than pretending
+otherwise, but visible is not the same as prevented.
 
 ## Secrets in your diffs
 
@@ -377,11 +397,14 @@ key is still the only fix.
 - **Later** — better surrounding-code context, additional free models as the
   catalog changes, optional direct-provider integrations, fork PR support
 
-**The largest open weakness is the fallback chain.** Only the primary model has
-been measured resistant to prompt injection; if it is rate-limited and a review
-falls through, a pull request author can suppress findings with a comment in their
-own diff. Reviews from those models say so in the review body, which makes it
-visible rather than silent, but it does not prevent it.
+**The largest open weakness is prompt injection, and it is no longer confined to
+the fallback chain.** Every model here has been measured following instructions
+planted in a diff. The primary — the default, used on almost every run — resisted
+6 of 8 payload classes and was silenced by the eighth, confirmed by ablation. So a
+pull request author can suppress findings in their own review by landing a
+suppression string in a diff, on the default configuration. Reviews disclose this
+in their body, which makes it visible rather than silent, but it does not prevent
+it, and no free model has yet been measured immune.
 
 See [`docs/execution-plan.md`](docs/execution-plan.md).
 

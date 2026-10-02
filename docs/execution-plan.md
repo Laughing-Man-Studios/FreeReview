@@ -1055,6 +1055,12 @@ does.
   decision, and the catalog data behind it is two days old.
 - **The fallback chain has no injection-resistant model past the primary.** This
   is the largest open weakness in the project and Phase 8 does not close it.
+- **No model is injection-resistant, including the primary.** Measured
+  2026-10-02 after widening the injection set from 2 payloads to 8: the primary
+  resisted 6 of 8 and was silenced by the eighth, confirmed by an ablation
+  control. The earlier `0 / 2` was two observations of one payload shape. This
+  moves the weakness off the fallback chain and onto the default path, which is
+  worse than the record above implies — see `docs/model-evaluation.md`.
 - `eval/thresholds.json` is deliberately absent (§12).
 - §15's `strict_providers` and `privacyVerifiedOn` items are now satisfied.
 
@@ -1190,13 +1196,20 @@ remembered. Two could not be ticked honestly:
 
 ### Still the largest open weakness
 
-Only the primary model has been measured resistant to prompt injection. If it is
-rate-limited and a review falls through, a pull request author can suppress
-findings with a comment in their own diff — precisely when fallbacks are reached.
-Reviews from those models disclose it in the review body, which makes the
-weakness visible instead of silent, and that is all. Closing it needs either a
-model measured resistant or a deterministic filter, and a filter for injection is
-itself a pattern-matching problem that can be evaded.
+**As of 2026-10-02 no model has been measured resistant**, the primary included.
+Widening the injection set from two payloads to eight found one that silences the
+primary outright — a suppression string disguised as a configuration value — with
+an ablation control confirming suppression rather than a missed bug. So this is no
+longer only reachable when a review falls through to a fallback; it is reachable
+on the default path. Every review now discloses it in the review body, which makes
+the weakness visible instead of silent, and that is all.
+
+Closing it needs either a model measured resistant across every payload class, or
+a deterministic filter — and a filter for injection is itself a pattern-matching
+problem that can be evaded. The most promising avenue is narrowing what reaches
+the model at all: the payload only works because attacker-controlled text is
+interleaved with the code under review, and no amount of instruction hardening
+changes that.
 
 ## 16. Risks
 

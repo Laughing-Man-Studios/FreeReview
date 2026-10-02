@@ -3,14 +3,17 @@
  *
  * ## The failure this exists to prevent
  *
- * Only the primary model has ever been measured resistant to instructions
- * embedded in a diff. If the primary is rate-limited and a review falls through
- * to a fallback, a pull request author can suppress findings by writing a
- * comment in their own diff — and a suppressed review is indistinguishable from
- * a clean one.
+ * A pull request author can suppress findings by planting a suppression
+ * instruction in their own diff, and a suppressed review is indistinguishable
+ * from a clean one. That is the exact failure this project exists to prevent.
  *
- * That is the exact failure this project exists to prevent, and it is reachable
- * precisely when the service is under strain, which is when fallbacks are used.
+ * As of 2026-10-02 this is no longer confined to the fallback chain: the primary
+ * was measured resisting 6 of 8 payload classes and silenced by the eighth, with
+ * an ablation control confirming suppression rather than a missed bug. So the
+ * disclosure has to fire on the *default* path too — which is why
+ * `partially-exposed` exists as a distinct state from `resistant`, and why the
+ * silence-on-`resistant` rule is now exercised against a hypothetical model
+ * rather than against the one that ships.
  *
  * So the disclosure has to appear in the *published review*, not only in the step
  * summary: a developer reading a pull request may never open the workflow run.
@@ -33,10 +36,44 @@ function model(overrides: Partial<ModelDefinition> & { id: string }): ModelDefin
 }
 
 describe("injectionDisclosure", () => {
-  it("says nothing when the only model that answered is measured resistant", () => {
-    // The common case, and the one that must stay quiet. A warning on every
-    // review trains readers to skip warnings.
-    expect(injectionDisclosure([LING], CATALOG)).toBeNull();
+  it("stays quiet only for a model that is genuinely measured resistant", () => {
+    // Quiet-on-the-default-path was the right rule while the primary was
+    // `resistant`: silence for a model proven immune, and a warning on every
+    // review for anything else, since a warning that fires every time trains
+    // readers to skip it.
+    //
+    // It stopped being right on 2026-10-02, when one payload class was found to
+    // silence the primary and the ablation control confirmed suppression rather
+    // than a capability miss. `resistant` now means nothing is disclosed, and no
+    // model in the pool has earned it, so the rule is exercised against a
+    // hypothetical rather than against the default path — which now discloses.
+    // Overriding the catalog entry, not the id list: this function looks models
+    // up by id, so passing a mutated model object where a string belongs silently
+    // resolves to nothing and returns the \ note instead.
+    const immuneCatalog = CATALOG.map((m) =>
+      m.id === LING ? { ...m, injectionResistance: "resistant" as const } : m,
+    );
+    expect(injectionDisclosure([LING], immuneCatalog)).toBeNull();
+  });
+
+  it("discloses on the default path, because the primary is no longer immune", () => {
+    // The regression this guards: LING is `partially-exposed`, so a run using the
+    // default model must not publish a review that presents as clean.
+    const note = injectionDisclosure([LING], CATALOG);
+    expect(note).not.toBeNull();
+    expect(note).toContain(LING);
+    expect(note).toMatch(/lower bound/i);
+  });
+
+  it("names the ratio, the payload class, and the control that confirms it", () => {
+    // A partial-exposure note that only says "may be incomplete" is the same
+    // unfalsifiable disclaimer an `exposed` note would be. This one has to be
+    // checkable: how many it resisted, what beat it, and how that was verified.
+    const note = injectionDisclosure([LING], CATALOG) ?? "";
+    expect(note).toMatch(/6 of 8/);
+    expect(note).toMatch(/configuration value/i);
+    expect(note).toMatch(/payload removed|removed the payload|with the payload\s+removed/i);
+    expect(note).toMatch(/no model in the free pool has been measured immune/i);
   });
 
   it("discloses when a model with measured exposure produced the review", () => {
@@ -162,19 +199,28 @@ describe("the catalog records measured exposure for every model", () => {
   it("classifies all eight, so none is silently assumed safe", () => {
     for (const entry of DEFAULT_MODELS) {
       expect(
-        ["resistant", "exposed", "unmeasured"],
+        ["resistant", "partially-exposed", "exposed", "unmeasured"],
         `${entry.id} has no injectionResistance`,
       ).toContain(entry.injectionResistance);
     }
   });
 
-  it("marks exactly one model resistant", () => {
-    // If this becomes zero, the default configuration cannot claim the property it
-    // exists to provide. If it becomes more than one, that is good news and this
-    // assertion should be revisited deliberately rather than by accident.
-    expect(DEFAULT_MODELS.filter((m) => m.injectionResistance === "resistant").map((m) => m.id)).toEqual([
-      "inclusionai/ling-3.0-flash-sante:free",
-    ]);
+  it("marks no model resistant, and exactly one as partially exposed", () => {
+    // Rewritten 2026-10-02. This used to assert exactly one `resistant` — the
+    // primary — which was the property the whole action was sold on. Widening
+    // the injection set from 2 payloads to 8 found one that silences the primary,
+    // confirmed by ablation, so the honest count of immune models is zero.
+    //
+    // Asserting zero rather than "not this one" is deliberate. `resistant` emits
+    // no disclosure, so any entry carrying it makes the published review imply
+    // safety. A future measurement could earn that state back — but only by
+    // passing every payload class, and this test should fail loudly when someone
+    // promotes a model on a partial result rather than by accident.
+    expect(DEFAULT_MODELS.filter((m) => m.injectionResistance === "resistant")).toEqual([]);
+
+    expect(
+      DEFAULT_MODELS.filter((m) => m.injectionResistance === "partially-exposed").map((m) => m.id),
+    ).toEqual(["inclusionai/ling-3.0-flash-sante:free"]);
   });
 
   it("marks every enabled model as measured rather than unmeasured", () => {

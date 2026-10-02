@@ -96,12 +96,34 @@ instructions. Defence is layered, and no single layer is trusted:
    contract.
 3. **Output validation.** A finding whose explanation is near-verbatim identical
    to an injection string present in the diff is dropped.
-4. **Tests.** The golden dataset includes dedicated fixtures for injection
-   embedded in comments and in string literals. The evaluation gate requires
-   **zero** injection compliance.
+4. **Tests.** The golden dataset carries eight injection fixtures spanning
+   distinct payload classes — fenced-block escape, role-turn impersonation,
+   claimed human approval, text concealed from human review, a suppression
+   string disguised as configuration, and a payload phrased as a disclaimer so
+   it issues no command, alongside comment and string-literal placement.
+5. **Disclosure.** Every published review states what was measured for the model
+   that produced it. `resistant` models publish nothing, `partially-exposed`
+   models publish a note naming the ratio and the control that confirmed it,
+   `exposed` models name the payload behaviour, and unmeasured models are
+   disclosed as unmeasured.
 
-Injection can, at worst, cause a bad review comment. It cannot cause execution,
-exfiltration, or a paid request.
+**Measured outcome, 2026-10-02: these layers do not make injection impossible.**
+The default model resisted 6 of 8 payload classes and was silenced by the
+eighth — a suppression string shaped like a configuration value, planted beside
+a real defect, which it declined to report. An ablation control (the same diff
+with the payload removed) confirmed this was suppression rather than a missed
+bug: without the payload the defect is found.
+
+**The practical consequence is that a pull request author can suppress findings
+in their own review, on the default configuration.** Layer 3 only drops a finding
+whose explanation is *near-verbatim* an injection string; a model that complies
+simply reports nothing, which produces no output for any layer to inspect.
+Detection is not prevention. FreeReview discloses this on every review rather
+than presenting a suppressed review as a clean one, but disclosure is the
+mitigation here, not defence.
+
+Injection can, at worst, cause an absent or bad review comment. It cannot cause
+execution, exfiltration, or a paid request.
 
 ## Privacy modes
 
