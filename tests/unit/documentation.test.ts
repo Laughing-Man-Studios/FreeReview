@@ -26,11 +26,73 @@ import { DEFAULT_MODELS } from "../../src/config.js";
 const read = (p: string): string => readFileSync(join(import.meta.dirname, "..", "..", p), "utf8");
 
 const README = read("README.md");
+
+/** Prose wraps in Markdown, so claims are matched against a whitespace-collapsed copy. */
+const flat = (text: string): string => text.replace(/\s+/g, " ");
 const PLAN = read("docs/execution-plan.md");
 const SECURITY = read("SECURITY.md");
 const EVAL = read("docs/model-evaluation.md");
 
 const byId = (id: string) => DEFAULT_MODELS.find((m) => m.id === id);
+
+describe("the README documents every action input", () => {
+  // The second documentation audit found `github_token` and `strict_providers`
+  // documented in action.yml but absent from the README's input table — so a
+  // reader configuring the action could not discover either. Both were added in
+  // earlier phases and both were missed.
+  it("lists every input action.yml declares", () => {
+    const declared = [...read("action.yml").matchAll(/^ {2}([a-z_]+):$/gm)].map((m) => m[1]!);
+    const documented = new Set([...README.matchAll(/^\| `([a-z_]+)` \|/gm)].map((m) => m[1]!));
+
+    // Only inputs belong here; outputs are declared in the same file and are
+    // documented in their own table.
+    const inputs = declared.filter((name) => !/^(status|findings_count|unanchored_count|files_reviewed|model_used|requests_used|review_url)$/.test(name));
+
+    for (const name of inputs) {
+      expect(documented.has(name), `action.yml declares '${name}' but the README input table omits it`).toBe(true);
+    }
+    expect(inputs.length).toBeGreaterThanOrEqual(10);
+  });
+
+  it("documents that strict_providers narrows availability", () => {
+    // The trade is the whole point. A reader who sees only "pin your providers"
+    // will set it and be surprised when reviews stop.
+    expect(README).toMatch(/strict_providers/);
+    expect(flat(README)).toMatch(/Narrows availability/i);
+  });
+});
+
+describe("the README documents credential redaction", () => {
+  it("states what is redacted and where", () => {
+    expect(flat(README)).toMatch(/[Rr]edacts? credential-shaped/);
+    for (const surface of ["review body", "step summary", "quoted source", "suggestion"]) {
+      expect(README, `README does not say redaction covers the ${surface}`).toContain(surface);
+    }
+  });
+
+  it("names the correct fix as something redaction must preserve", () => {
+    // The false positive that would make redaction worse than none.
+    expect(flat(README)).toMatch(/process\.env\.API_KEY/);
+  });
+
+  it("states the limitation rather than implying completeness", () => {
+    expect(README).toMatch(/Not covered/i);
+    expect(flat(README)).toMatch(/Rotating a leaked key is still the only fix/i);
+  });
+});
+
+describe("the README states the open weakness rather than implying completeness", () => {
+  it("says the fallback chain has no injection-resistant model", () => {
+    // The single most important thing a prospective user should know, and the
+    // thing a project with this premise is most tempted to bury.
+    expect(README).toMatch(/fallback chain/i);
+    expect(flat(README)).toMatch(/largest open weakness/i);
+  });
+
+  it("does not claim Phase 8 closed it", () => {
+    expect(flat(PLAN)).toMatch(/fallback chain has no injection-resistant model past the primary/i);
+  });
+});
 
 describe("the README model table matches the catalog", () => {
   it("names the model that actually ships as primary", () => {
@@ -60,18 +122,18 @@ describe("the README model table matches the catalog", () => {
     // The production bug: qwen advertises `structured_outputs` and 404s on it.
     const qwen = byId("qwen/qwen3.8-27b:free")!;
     expect(qwen.supportsJsonSchema).toBe(false);
-    expect(README).toMatch(/advertises[\s\S]{0,80}404/i);
+    expect(flat(README)).toMatch(/advertises .{0,80}404/i);
   });
 
   it("states that capability mode is chosen by measurement", () => {
     // Without this, a reader would reasonably assume the strongest advertised
     // capability is used, which is the rule that shipped recall 0.47.
-    expect(README).toMatch(/preferredMode/);
+    expect(flat(README)).toMatch(/preferredMode/);
     expect(README).toMatch(/eligib/i);
   });
 
   it("discloses that the primary is the only injection-resistant model", () => {
-    expect(README).toMatch(/only model that has never followed instructions/i);
+    expect(flat(README)).toMatch(/only model that has never followed instructions/i);
     expect(README).toMatch(/disclose/i);
   });
 
@@ -115,7 +177,7 @@ describe("the execution plan does not promise things that do not exist", () => {
   });
 
   it("states why severity is not scored", () => {
-    expect(PLAN).toMatch(/severity accuracy[\s\S]{0,80}not measured/i);
+    expect(flat(PLAN)).toMatch(/severity accuracy.{0,40}not measured/i);
   });
 });
 

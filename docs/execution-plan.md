@@ -990,13 +990,73 @@ A prompt iteration re-runs the same fixtures against the same diffs. The unchang
 
 This is worth building because it attacks the cost directly rather than the ceiling: it is the difference between ~200 requests and materially fewer, and it makes the *unfunded* path viable rather than merely slow. The cache is bypassable via `--no-cache` when a provider-side change makes a fresh response genuinely informative, which is a rarer event than it sounds and should be recorded when it happens.
 
-### Phase 8 — Hardening, docs, release (1.5 days) — **NOT STARTED**
+### Phase 8 — Hardening, docs, release — **SUBSTANTIALLY COMPLETE; v1 cut outstanding**
 **Documentation audit completed 2026-10-01.** README's model table, this plan's
 §12 thresholds, the Phase 7 status, and the Stage A cross-examination record were
 all stale and have been corrected. `privacyVerifiedOn` is now populated for every
 model where it is meaningful (§8a), which makes SECURITY.md's claim true.
 Security review; secret/log audit with the seeded-secret test; rate-limit stress (30 synthetic PRs against the mock, assert ≤ 8 requests); stale-commit stress; `verify-models.yml`; `README.md` / `SECURITY.md` / `LICENSE`; `release.yml`; marketplace metadata.
 **Exit:** every §15 item demonstrably true; a tagged release installs and runs from a clean consumer repo.
+
+#### 8a. Completed 2026-10-01
+
+**The seeded-secret test found a live leak.** A finding about a hardcoded
+credential *republished the credential* — in the explanation, the quoted source
+block, and the `suggestion` block, where accepting it would write the secret into
+the branch. Prose was already being neutralised for markdown structure; nothing
+redacted it for *secrets*. The largest verbatim block, the quoted source, was the
+worst of it.
+
+Redaction now covers the review body, step summary, quoted source and suggestion,
+keeping a short tail. Deliberately narrow: the first draft redacted
+`apiKey: process.env.API_KEY`, which is the correct fix, destroying the suggestion
+while leaving the real secret in prose. 22 tests decide whether it is usable —
+12 credential shapes caught, 10 ordinary code and prose forms preserved.
+
+**`strict_providers` (§8b).** `provider.only` pinned in strict mode. `zdr: true`
+constrains *how* a provider handles data, not *which* provider serves the request,
+and a provider can be attached to a model after verification. Empty by default,
+because pinning narrows availability — an unavailable reviewer is visible, an
+unverified one is not.
+
+**`verify-models.yml`.** Daily, non-blocking, splits findings into *actionable*
+(our config is wrong) and *remeasure* (the catalog moved, our measurement is
+stale). The distinction is load-bearing: `qwen`'s live listing advertises
+`structured_outputs`, which 404s, and omits `response_format`, which works —
+exactly backwards. A check that said "adopt the advertised value" would have
+broken a working model. It found that inversion on its first run.
+
+**Mutation test (§15).** Hostile model output through the whole pipeline:
+placement is unaffected by injected `line`/`side`/`position` payloads smuggled
+through the explanation, and a quote that does not exist is rejected rather than
+falling back to a model-supplied line number. Writing it turned up that
+`validateFinding` re-derives `anchoredText` from the index rather than trusting
+the candidate — stronger than the property first asserted.
+
+**Stress tests.** 30 synthetic PRs each pinned to the shipped ceiling of 8, with
+per-run isolation asserted (all 30 spend exactly 8) and retries counted as spent
+requests. Stale-commit stress pins whole-review discard and never treating an
+unverifiable head as confirmation.
+
+**Consumer smoke test.** Installs a *tag* rather than a moving ref, and
+deliberately does not build this project — a consumer installs a published ref and
+runs the committed bundle. Verified: `v0.1.0` installed under `strict`, found and
+anchored a real defect on a clean consumer repository, published.
+
+Two constraints shaped it. The organisation forbids Actions from creating pull
+requests — the same restriction that removed `release-please` — so the workflow
+pushes a branch and verifies, and a maintainer opens the pull request. And it uses
+the runner's `gh` rather than a third-party action, for the reason `release.yml`
+does.
+
+#### 8b. Outstanding
+
+- **v1 is not cut.** `v0.1.0` is tagged and verified. Cutting v1 is a human
+  decision, and the catalog data behind it is two days old.
+- **The fallback chain has no injection-resistant model past the primary.** This
+  is the largest open weakness in the project and Phase 8 does not close it.
+- `eval/thresholds.json` is deliberately absent (§12).
+- §15's `strict_providers` and `privacyVerifiedOn` items are now satisfied.
 
 #### Phase 8 additions — endpoint privacy (deferred from Phase 4, agreed 2026-09-28)
 
@@ -1030,33 +1090,57 @@ A workflow in this repo running the action on its own PRs. Findings here are adv
 
 All of `docs/plan.md` §38, plus:
 
-- [ ] `path` present and required in the finding schema; multi-file chunks anchor correctly
-- [ ] Three independent paid-routing guards, each with a test that fails if removed
-- [ ] `provider.max_price` asserted zero in a contract test
-- [ ] Quota preflight via `GET /api/v1/key`; exhaustion reported, never silent
-- [ ] Capability-gated request shape; no `require_parameters` without `json_schema`
-- [ ] HTTP 200 with an `error` body is detected
-- [ ] `MODEL_OUTPUT_TRUNCATED` is not retried
-- [ ] Anchoring resolves against the full-file index, not the chunk — proven by test
-- [ ] Context-only anchors rejected
-- [ ] Fence and role-marker neutralisation covered by snapshot tests
-- [ ] Anchoring property invariants green at 1000 cases
-- [ ] Mutation test proves a model-supplied line number cannot reach the published payload
-- [ ] `dist/index.js` free of `child_process` / `eval` / `Function(`
-- [ ] Seeded-secret test: no fixture secret in any log, summary, or comment
-- [ ] `check:dist` in CI; `dist/` committed and verified
-- [ ] Weekly `verify-models.yml` drift check exists
-- [ ] `privacyVerifiedOn` set on every enabled model; `strict_providers` allowlist implemented
+- [x] `path` present and required in the finding schema; multi-file chunks anchor correctly
+- [x] Three independent paid-routing guards, each with a test that fails if removed
+- [x] `provider.max_price` asserted zero in a contract test
+- [x] Quota preflight via `GET /api/v1/key`; exhaustion reported, never silent
+- [x] Capability-gated request shape; no `require_parameters` without `json_schema`
+- [x] HTTP 200 with an `error` body is detected
+- [x] `MODEL_OUTPUT_TRUNCATED` is not retried
+- [x] Anchoring resolves against the full-file index, not the chunk — proven by test
+- [x] Context-only anchors rejected
+- [x] Fence and role-marker neutralisation covered by snapshot tests
+- [x] Anchoring property invariants green at 1000 cases
+- [x] Mutation test proves a model-supplied line number cannot reach the published payload
+- [x] `dist/index.js` free of `child_process` / `eval` / `Function(`
+- [x] Seeded-secret test: no fixture secret in any log, summary, or comment
+- [x] `check:dist` in CI; `dist/` committed and verified
+- [x] Weekly `verify-models.yml` drift check exists
+- [x] `privacyVerifiedOn` set on every enabled model; `strict_providers` allowlist implemented
 - [x] `action.yml` validated by `check:action` in CI and in the release
 - [x] Default configuration produces a review under the default privacy mode
 - [x] ZDR-capable models ordered first in strict mode; `zdrEligible` recorded per model
 - [x] `max_output_tokens` default sufficient for a reasoning model to finish
-- [ ] README states quota expectation, privacy posture, and that findings are advisory
-- [ ] 32 golden fixtures across 26 categories with a held-out split; held-out gate met
-- [ ] `npm run validate:fixtures` green
-- [ ] `docs/model-evaluation.md` records raw measured numbers
+- [x] README states quota expectation, privacy posture, and that findings are advisory
+- [~] **Superseded.** 17 Stage A + 10 Stage B fixtures across the classes Stage B added; held-out scored **once**. All held-out data is now spent, so the gate cannot be re-measured — see §12 and `docs/model-evaluation.md`.
+- [x] `npm run validate:fixtures` green
+- [x] `docs/model-evaluation.md` records raw measured numbers
 
 ---
+
+
+### Verification note, 2026-10-01
+
+Every box above was checked against the code or a passing test rather than
+remembered. Two could not be ticked honestly:
+
+- **The held-out gate.** All held-out data is spent. Stage A's four fixtures and
+  Stage B's ten have each been scored, and Stage B was scored exactly once. With
+  nothing clean left, the gate is no longer measurable — which is why
+  `eval/thresholds.json` does not exist rather than existing with numbers fitted
+  to data already seen.
+- **`v1` is not cut.** `v0.1.0` is tagged and verified end to end, which satisfies
+  "a tagged release installs and runs". Cutting `v1` is a human decision.
+
+### Still the largest open weakness
+
+Only the primary model has been measured resistant to prompt injection. If it is
+rate-limited and a review falls through, a pull request author can suppress
+findings with a comment in their own diff — precisely when fallbacks are reached.
+Reviews from those models disclose it in the review body, which makes the
+weakness visible instead of silent, and that is all. Closing it needs either a
+model measured resistant or a deterministic filter, and a filter for injection is
+itself a pattern-matching problem that can be evaded.
 
 ## 16. Risks
 

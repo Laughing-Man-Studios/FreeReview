@@ -131,7 +131,9 @@ reviewed at all.
 | Input | Default | Description |
 | --- | --- | --- |
 | `openrouter_api_key` | *required* | OpenRouter API key. Read from the environment, never logged. |
+| `github_token` | `${{ github.token }}` | Token used to read the pull request and publish the review. Defaults to the workflow's own token, which is usually correct. |
 | `privacy_mode` | `strict` | `strict` sends `zdr: true` + `data_collection: "deny"`. `relaxed` drops both and is reported loudly in the summary **and** the review. |
+| `strict_providers` | *(empty)* | Comma-separated OpenRouter provider slugs to pin under `strict`, sent as `provider.only`. Empty leaves routing unconstrained. **Narrows availability** — a provider that stops serving the free tier ends the review rather than silently switching to an unverified one. |
 | `primary_model` | bundled | An explicit `:free` model ID. Non-`:free` IDs are rejected before any network call. |
 | `fallback_models` | bundled | Comma-separated `:free` IDs to try in order when the primary is unavailable. |
 | `max_changed_lines` | `2000` | Skip (non-blocking) if the PR exceeds this many changed lines. |
@@ -305,16 +307,46 @@ This is a real limitation, not a solved problem: when the primary is rate-limite
 and a review falls through, findings can be suppressed. The disclosure makes that
 visible rather than pretending otherwise.
 
+## Secrets in your diffs
+
+A diff can contain a credential — that is a realistic scenario, not a
+hypothetical one, and reviewing the code a human pushed means reading it. So a
+finding about a hardcoded key naturally quotes the key back.
+
+FreeReview **redacts credential-shaped substrings from everything it publishes**:
+the review body, the step summary, the quoted source block, and the `suggestion`
+block (the last matters most — accepting a suggestion writes it into your branch).
+A short tail is kept so the finding stays actionable.
+
+Covered shapes: vendor-prefixed keys (`sk-`, `pk-`, `rk-`), AWS access key ids,
+GitHub/Slack/Google/SendGrid tokens, JWTs, PEM private-key headers, and
+credentials in assignments. The patterns are deliberately narrow, because the
+correct fix for a hardcoded key is `apiKey: process.env.API_KEY` and redacting
+*that* would destroy the suggestion while leaving the real secret in prose.
+
+**Not covered:** a high-entropy secret with no recognisable prefix, no assignment
+and no PEM header is not detected. Redaction reduces the blast radius of an
+echoed credential — it does not make credentials safe to commit. Rotating a leaked
+key is still the only fix.
+
 ## Roadmap
 
 - **Done** — diff parser, deterministic anchoring, context budgeting, OpenRouter
   client and scheduler, prompt and structured output, publisher, golden
   evaluation dataset with a held-out split, capability probing, model
-  benchmarking, prompt-injection disclosure
-- **Next** — hardening and release; prompt iteration against the falsy-null
-  coercion that every model measured so far has missed
+  benchmarking, prompt-injection disclosure, credential redaction, catalog drift
+  detection, rate-limit and stale-commit stress, and a consumer smoke test
+  proving a tagged release installs and runs
+- **Next** — prompt iteration against the falsy-null coercion that every model
+  measured so far has missed
 - **Later** — better surrounding-code context, additional free models as the
   catalog changes, optional direct-provider integrations, fork PR support
+
+**The largest open weakness is the fallback chain.** Only the primary model has
+been measured resistant to prompt injection; if it is rate-limited and a review
+falls through, a pull request author can suppress findings with a comment in their
+own diff. Reviews from those models say so in the review body, which makes it
+visible rather than silent, but it does not prevent it.
 
 See [`docs/execution-plan.md`](docs/execution-plan.md).
 
