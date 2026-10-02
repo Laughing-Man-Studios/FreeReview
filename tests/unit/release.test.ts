@@ -261,14 +261,34 @@ describe("the changelog's compare links stay consistent", () => {
     expect(afterFirstDef).not.toMatch(/^#{2,4} /m);
   });
 
-  it("points [Unreleased] at the newest released version, not an older one", () => {
-    // This one went stale silently: [Unreleased] compared against v1.0.0 while
-    // v1.0.1 was already published, so the compare page omitted a whole release.
-    const released = headings.filter((h) => h !== "Unreleased" && h !== "1.0.0");
-    const newest = released[released.length - 1];
-    expect(newest).toBeDefined();
+  it("points [Unreleased] at the newest version above it", () => {
+    // This went stale silently: [Unreleased] compared against v1.0.0 while v1.0.1
+    // was published, so the compare page omitted a whole release.
+    //
+    // An earlier attempt allowed the base to lag a *drafted* section, reasoning
+    // that a version is written before its tag exists. That exemption was wrong:
+    // a drafted section already carries a compare link, so "has a link" cannot
+    // distinguish drafted from released, and the guard then demanded an exact
+    // match on a base that pointed at an untagged version. The honest form is an
+    // exact match against the newest heading, and bumping the base is simply the
+    // last step of cutting a release — same as tagging it.
+    const cmp = (a: string, b: string): number => {
+      const pa = a.split(".").map(Number);
+      const pb = b.split(".").map(Number);
+      for (let i = 0; i < Math.max(pa.length, pb.length); i += 1) {
+        const d = (pa[i] ?? 0) - (pb[i] ?? 0);
+        if (d !== 0) return d;
+      }
+      return 0;
+    };
+    // Semver max, not first-or-last in file order: the changelog is written
+    // newest-first, so `[0]` and `.pop()` disagree, and only one of them is
+    // currently right depending on which way someone last edited.
+    const versions = headings.filter((h) => h !== "Unreleased");
+    const newest = versions.reduce((a, b) => (cmp(b, a) > 0 ? b : a));
+    expect(newest, "no version section found above [Unreleased]").toBeDefined();
     const link = CHANGELOG.match(/^\[Unreleased\]:\s*(\S+)$/m)?.[1] ?? "";
-    // Heading is `[1.0.1]`, tag is `v1.0.1` — the `v` prefix is not optional.
+    // Heading is `[1.0.2]`, tag is `v1.0.2` — the `v` prefix is not optional.
     expect(link).toContain(`/compare/v${newest}...HEAD`);
   });
 });
