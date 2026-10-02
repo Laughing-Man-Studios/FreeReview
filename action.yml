@@ -1,4 +1,9 @@
-name: "FreeReview"
+# Display name only. GitHub requires it to be unique across every action, user,
+# and organization, and 'FreeReview' was already taken, so the Marketplace
+# submission was rejected. Renaming is free: `uses:` resolves on owner/repo and
+# never on this field, so existing `@v1` consumers are unaffected. The published
+# review header is a separate hardcoded string in src/output/comment.ts.
+name: "Free Review Action"
 # Under 125 characters: GitHub rejects the Marketplace submission otherwise,
 # and does so only at submission time. `npm run check:action` guards the bound.
 description: "Advisory AI code review on pull requests using free models only. Never approves, blocks, or fails a build."
