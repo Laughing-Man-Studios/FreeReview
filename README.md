@@ -9,7 +9,13 @@
 [![Code of Conduct](https://img.shields.io/badge/CoC-contribute-lightgrey.svg)](CODE_OF_CONDUCT.md)
 [![Security Policy](https://img.shields.io/badge/Security-Policy-lightgrey.svg)](SECURITY.md)
 
-> ### ✅ Released — v1.0.0
+> ### ✅ Released — install `@v1`
+>
+> No version number here on purpose. This banner renders straight into the
+> Marketplace listing, and a hardcoded version drifts on every patch release —
+> it was still claiming `v1.0.0` after `v1.0.1` shipped. The install ref is the
+> thing that does not change, and `v1` is a moving branch maintained by the
+> release workflow, so it is also the only form that cannot go stale.
 >
 > ```yaml
 > - uses: Laughing-Man-Studios/FreeReview@v1

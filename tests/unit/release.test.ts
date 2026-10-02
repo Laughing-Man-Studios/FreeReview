@@ -216,3 +216,53 @@ describe("the 1.0.1 notes describe what 1.0.1 is", () => {
     expect(section).toMatch(/@v1` is unaffected/i);
   });
 });
+
+describe("the changelog's compare links stay consistent", () => {
+  // Relocating the 1.0.0 engineering record stranded the link-definition block
+  // in the middle of the file and left `[1.0.1]` undefined, with no test failing.
+  // These are structural properties of the file, so they are checked structurally.
+
+  // Narrowed at the source rather than asserted at each use: `m[1]` on a
+  // RegExpMatchArray is `string | undefined` under noUncheckedIndexedAccess, and
+  // a filtered `string[]` means every later loop is honest about its input.
+  const capture = (re: RegExp): string[] =>
+    [...CHANGELOG.matchAll(re)].map((m) => m[1]).filter((v): v is string => v !== undefined);
+
+  const headings = capture(/^## \[([^\]]+)\]/gm);
+  const defined = capture(/^\[([^\]]+)\]:/gm);
+
+  it("defines a compare link for every version heading", () => {
+    for (const version of headings) {
+      expect(CHANGELOG).toMatch(new RegExp(`^\\[${version.replace(/[.-]/g, "\\$&")}\\]:\\s*\\S+`, "m"));
+    }
+  });
+
+  it("defines no compare link for a version that has no heading", () => {
+    // The inverse error: an orphan definition is usually a rename that left the
+    // old name behind, which renders as a dead link at the foot of the page.
+    for (const name of defined) {
+      expect(headings).toContain(name);
+    }
+  });
+
+  it("keeps the link definitions in one trailing block", () => {
+    // Stranded mid-file, the block reads as part of whichever section precedes
+    // it. GitHub renders the definitions fine but the document lies about its
+    // own structure, and nothing else notices.
+    const firstDef = CHANGELOG.search(/^\[[^\]]+\]:/m);
+    expect(firstDef).toBeGreaterThan(-1);
+    const afterFirstDef = CHANGELOG.slice(firstDef);
+    expect(afterFirstDef).not.toMatch(/^#{2,4} /m);
+  });
+
+  it("points [Unreleased] at the newest released version, not an older one", () => {
+    // This one went stale silently: [Unreleased] compared against v1.0.0 while
+    // v1.0.1 was already published, so the compare page omitted a whole release.
+    const released = headings.filter((h) => h !== "Unreleased" && h !== "1.0.0");
+    const newest = released[released.length - 1];
+    expect(newest).toBeDefined();
+    const link = CHANGELOG.match(/^\[Unreleased\]:\s*(\S+)$/m)?.[1] ?? "";
+    // Heading is `[1.0.1]`, tag is `v1.0.1` — the `v` prefix is not optional.
+    expect(link).toContain(`/compare/v${newest}...HEAD`);
+  });
+});

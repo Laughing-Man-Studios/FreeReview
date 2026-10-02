@@ -201,9 +201,13 @@ installed from a clean consumer repository and found and anchored a real defect.
 Every Definition-of-Done item in [`docs/execution-plan.md`](docs/execution-plan.md)
 is verified by a test.
 
-## [Unreleased]
+### Full change detail
 
-### Added
+The complete engineering record for this release. The sections above are the
+curated summary; this is the itemised list of what actually shipped, kept here
+because it was written as a running log and is worth more than a summary.
+
+#### Added
 
 - **Eligibility gate** — a fork, external-contribution, public-repository,
   draft, closed, or non-`pull_request` PR is detected and skipped before any
@@ -232,7 +236,7 @@ is verified by a test.
   unparseable and every `uses:` invocation fails at load time. This shipped
   once; `check:action` now guards it in CI and in the release.
 
-### Pipeline
+#### Pipeline
 
 - **Strict unified diff parser and deterministic anchor resolver.** The model
   supplies source text, never a line number; local code maps that text to exactly
@@ -268,7 +272,7 @@ is verified by a test.
   offending comment by recursing into both halves rather than dropping the rest,
   and publishes a summary-only review if every comment is rejected.
 
-### Security
+#### Security
 
 - **A run that reviewed nothing can no longer say it found nothing.** Live
   verification caught a run in which every model failed to route and the
@@ -298,5 +302,10 @@ is verified by a test.
   `no_findings`, which would tell a developer their code was clean when it had
   never been examined.
 
-[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.0...HEAD
+## [Unreleased]
+
+Nothing yet. Add a `## [x.y.z]` section above this one when cutting a release.
+
+[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v0.1.0...v1.0.0
