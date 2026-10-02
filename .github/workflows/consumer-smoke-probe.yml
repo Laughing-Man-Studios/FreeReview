@@ -1,7 +1,6 @@
 name: probe
 on:
   pull_request:
-    paths: [".github/workflows/consumer-smoke-probe.yml"]
 
 permissions:
   contents: read
