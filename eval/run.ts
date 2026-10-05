@@ -35,7 +35,7 @@
 
 import { join } from "node:path";
 import { writeFileSync, mkdirSync } from "node:fs";
-import { STAGE_A, STAGE_B } from "./lib/fixtures.js";
+import { STAGE_A, STAGE_B, type Fixture } from "./lib/fixtures.js";
 import { createCache, type ResponseCache } from "./lib/cache.js";
 import {
   aggregate,
@@ -111,6 +111,23 @@ function definitionFor(modelId: string): ModelDefinition {
   return { ...found, enabled: true };
 }
 
+/**
+ * Fixtures to run for a stage, narrowed by `--only`.
+ *
+ * Shared deliberately. Filtering only at the top level left `runModel` iterating
+ * the unfiltered list, so the flag would have printed "16 of 31 fixtures" and
+ * then measured all 31 — a filter that reports one thing and does another.
+ */
+function selectFixtures(stage: "a" | "b", only: string): readonly Fixture[] {
+  const all = stage === "b" ? STAGE_B : STAGE_A;
+  if (!only) return all;
+  const matcher =
+    only.startsWith("/") && only.lastIndexOf("/") > 0
+      ? new RegExp(only.slice(1, only.lastIndexOf("/")))
+      : null;
+  return all.filter((f) => (matcher ? matcher.test(f.id) : f.id.includes(only)));
+}
+
 interface Args {
   readonly stage: "a" | "b";
   readonly noCache: boolean;
@@ -121,6 +138,8 @@ interface Args {
   readonly sweep: boolean;
   /** Independent passes per (model, mode), for a spread rather than a point. */
   readonly repeat: number;
+  /** Substring or /regex/ filter on fixture ids. Empty means every fixture. */
+  readonly only: string;
 }
 
 function parseArgs(argv: readonly string[]): Args {
@@ -134,6 +153,7 @@ function parseArgs(argv: readonly string[]): Args {
   let outDir = join(import.meta.dirname, "results");
   let sweep = false;
   let repeat = 1;
+  let only = "";
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
@@ -150,6 +170,8 @@ function parseArgs(argv: readonly string[]): Args {
       stage = value;
     } else if (arg === "--sweep") sweep = true;
     else if (arg === "--repeat") repeat = Math.max(1, Number.parseInt(argv[++i] ?? "1", 10));
+    else if (arg === "--only") only = argv[++i] ?? "";
+    else if (arg?.startsWith("--only=")) only = arg.slice("--only=".length);
   }
 
   return {
@@ -159,6 +181,7 @@ function parseArgs(argv: readonly string[]): Args {
     outDir,
     sweep,
     repeat,
+    only,
     models: models.length > 0 ? models : MODELS.map((m) => m.id),
   };
 }
@@ -228,7 +251,7 @@ async function runModel(
   const client = new OpenRouterClient({ config });
   const scheduler = new Scheduler({ client, config });
   const scores: FixtureScore[] = [];
-  const stageFixtures = args.stage === "b" ? STAGE_B : STAGE_A;
+  const stageFixtures = selectFixtures(args.stage, args.only);
   const injectionIds = new Set(stageFixtures.filter((f) => f.injection).map((f) => f.id));
 
   let requests = 0;
@@ -338,7 +361,20 @@ async function main(): Promise<void> {
   });
   const budget = { spent: 0 };
 
-  const fixtures = args.stage === "b" ? STAGE_B : STAGE_A;
+  const stageAll = args.stage === "b" ? STAGE_B : STAGE_A;
+  const fixtures = selectFixtures(args.stage, args.only);
+  // A filter that matches nothing and exits 0 is the worst outcome available: it
+  // looks like a completed run and cost nothing.
+  if (fixtures.length === 0) {
+    console.error(
+      `eval — --only ${JSON.stringify(args.only)} matched no fixtures in stage ${args.stage.toUpperCase()}. ` +
+        `Available: ${stageAll.length} fixtures, e.g. ${stageAll.slice(0, 3).map((f) => f.id).join(", ")}`,
+    );
+    process.exit(1);
+  }
+  if (args.only && fixtures.length < stageAll.length) {
+    console.log(`  filter: ${fixtures.length} of ${stageAll.length} fixtures match ${args.only}`);
+  }
   const stageLabel = args.stage.toUpperCase();
   const oneShot = args.stage === "b" && args.repeat === 1 && !args.sweep;
   console.log(`eval — Stage ${stageLabel}, ${fixtures.length} fixtures, prompt ${PROMPT_VERSION}`);

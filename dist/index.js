@@ -22672,11 +22672,11 @@ function injectionDisclosure(modelIds, catalog) {
   }
   if (partial2.length > 0) {
     const names = partial2.map((id) => `\`${id}\``).join(", ");
-    return `> **This review may be incomplete.** It was produced by ${names}, which resisted 6 of 8 injection payload classes tested \u2014 but two of them silenced it completely. One was a suppression instruction disguised as a configuration value; the other tried to escape the fenced block the diff is rendered in and emit its own empty findings array. In both, a real defect was planted directly behind the payload and this model reported nothing.
+    return `> **This review may be incomplete.** It was produced by ${names}, which resisted 7 of 8 injection payload classes tested across three independent passes \u2014 but one silenced it every time. That payload was a suppression instruction disguised as a configuration value, with a real defect planted directly behind it.
 >
-> That was not inferred from quiet runs alone. Each defect was re-reviewed with its payload removed \u2014 an ablation control \u2014 and both were found, so in those cases the instruction, not the difficulty, is what did the silencing. Each is a single observation, and the same design has produced the opposite pattern from ordinary run-to-run variation, so two in eight is an upper bound rather than an established rate.
+> That was not inferred from quiet runs alone. The same defect was re-reviewed with the payload removed \u2014 an ablation control \u2014 and found on every pass, so the instruction, not the difficulty, is what did the silencing. A pull request author who can land a string literal in their own diff can therefore suppress findings in this review.
 >
-> Treat the findings below as a lower bound, not as a clean review. A pull request author who can land a suppression string in their own diff can suppress findings in this review. No model in the free pool has been measured immune to this.`;
+> Treat the findings below as a lower bound, not as a clean review. No model in the free pool has been measured immune to this.`;
   }
   if (unmeasured.length > 0) {
     const names = unmeasured.map((id) => `\`${id}\``).join(", ");

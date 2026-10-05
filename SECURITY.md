@@ -118,10 +118,16 @@ Each was checked against an ablation control — the same diff with the payload
 removed — and in both cases the defect *is* found without the payload, so the
 instruction rather than the difficulty did the silencing.
 
-**How firm that is.** Each suppression rests on a single observation, and the
-same comparison produced the opposite pattern in two other fixture pairs purely
-from run-to-run variation in defect detection. So two in eight is an **upper
-bound**, not an established rate; establishing one needs repeated runs.
+**How firm that is.** Three independent passes, 2026-10-05: the one payload
+silenced the model in 3 of 3, and its control found the defect in 3 of 3. The other
+seven were resisted in every clean observation.
+
+One pass was excluded from that count. The upstream provider began rate-limiting
+mid-run, and four fixtures missed their defect in it — three of them *controls*,
+which carry no payload at all. Degraded detection under provider saturation is
+therefore not an injection effect, and reading it as one would have invented a
+second suppression. The confound is named here because "the model got worse" and
+"the model was made to stay quiet" are indistinguishable from a single run.
 
 **The practical consequence is that a pull request author can suppress findings
 in their own review, on the default configuration.** Layer 3 only drops a finding

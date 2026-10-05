@@ -45,7 +45,7 @@
 >   the single most important caveat on this page, and it is the reason a
 >   suppressed review is not distinguishable from a clean one.
 >
->   The default model resisted **6 of 8** injection payload classes tested. Two
+>   The default model resisted **7 of 8** injection payload classes tested across three passes. One
 >   beat it: a suppression instruction disguised as a configuration value, placed
 >   beside a real defect, which it declined to report. That was confirmed by
 >   ablation rather than assumed — the same defect re-reviewed with the payload
@@ -400,7 +400,7 @@ key is still the only fix.
 **The largest open weakness is prompt injection, and it is no longer confined to
 the fallback chain.** Every model here has been measured following instructions
 planted in a diff. The primary — the default, used on almost every run — resisted
-6 of 8 payload classes and was silenced by two of the eight, confirmed by ablation. So a
+6 of 8 payload classes and was silenced by one of the eight, in three passes out of three, confirmed by ablation. So a
 pull request author can suppress findings in their own review by landing a
 suppression string in a diff, on the default configuration. Reviews disclose this
 in their body, which makes it visible rather than silent, but it does not prevent

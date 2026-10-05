@@ -156,7 +156,7 @@ describe("release notes resolve from the changelog", () => {
     // class silences it, confirmed by ablation. A test that fails when the
     // documentation becomes accurate is a test that was protecting the error.
     expect(flat(section)).toMatch(/no model resists prompt injection/i);
-    expect(flat(section)).toMatch(/silenced by two of the eight/i);
+    expect(flat(section)).toMatch(/silenced by one of the eight, in three passes out of three/i);
     expect(flat(section)).toMatch(/steered by the code under review/i);
     expect(flat(section)).toMatch(/largest open weakness/i);
     expect(flat(section)).not.toMatch(/only the default model resists/i);
