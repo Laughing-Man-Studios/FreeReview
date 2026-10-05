@@ -22,6 +22,7 @@ import { describe, expect, it } from "vitest";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { DEFAULT_MODELS } from "../../src/config.js";
+import { injectionDisclosure } from "../../src/output/comment.js";
 
 const read = (p: string): string => readFileSync(join(import.meta.dirname, "..", "..", p), "utf8");
 
@@ -145,7 +146,7 @@ describe("the README model table matches the catalog", () => {
     // earn one back, and this test should fail loudly when that happens rather
     // than be quietly relaxed.
     expect(flat(README)).toMatch(/no model here is immune/i);
-    expect(flat(README)).toMatch(/6 of 8/);
+    expect(flat(README)).toMatch(/7 of 8/);
     // And it must not still carry the superseded claim anywhere.
     expect(flat(README)).not.toMatch(/only model that has never followed instructions/i);
     expect(README).not.toMatch(/\*\*resistant\*\* \(0\/2/);
@@ -164,6 +165,62 @@ describe("the README model table matches the catalog", () => {
     // It is a real limitation, and saying otherwise would be the exact failure
     // mode this project exists to prevent.
     expect(README).toMatch(/limitation, not a solved problem/i);
+  });
+});
+
+describe("the injection count is stated consistently everywhere", () => {
+  // Added after a bulk regex edit corrected only one of six phrasings, leaving
+  // the docs claiming the model resisted "6 of 8" in places while the
+  // disclosure said 7 — a sentence that does not add up, since 6 + 1 ≠ 8.
+  //
+  // The count appears in the published disclosure, README, SECURITY.md, the
+  // changelog and the execution plan. Nothing structurally tied them together,
+  // and a prose assertion cannot catch a *different* prose drifting. So this
+  // reads the number out of each surface and requires them to agree.
+  const surfaces: readonly (readonly [string, string])[] = [
+    ["README.md", README],
+    ["SECURITY.md", SECURITY],
+    ["docs/execution-plan.md", PLAN],
+    ["docs/model-evaluation.md", EVAL],
+  ];
+
+  // Every "/n of 8" that refers to injection payload classes.
+  const countsFor = (text: string): string[] =>
+    [...flat(text).matchAll(/(\d) of 8 (?:injection )?payload classes/g)].map((m) => m[1]!);
+
+  it("agrees on how many payload classes were resisted", () => {
+    for (const [name, text] of surfaces) {
+      for (const n of countsFor(text)) {
+        expect(n, `${name} states '${n} of 8', but the measured figure is 7`).toBe("7");
+      }
+    }
+  });
+
+  it("agrees with the disclosure the action actually publishes", () => {
+    // The code is the source of truth for what a user reads; the docs are
+    // commentary on it. If those two ever disagree, the user is misled.
+    const note = injectionDisclosure([DEFAULT_MODELS[0]!.id], DEFAULT_MODELS) ?? "";
+    const published = note.match(/resisted (\d) of 8/)?.[1];
+    expect(published, "the default-path disclosure states no count").toBeDefined();
+    for (const [name, text] of surfaces) {
+      for (const n of countsFor(text)) {
+        expect(n, `${name} says '${n} of 8'; the published disclosure says ${published}`).toBe(published);
+      }
+    }
+  });
+
+  it("never states a count without the limitation travelling with it", () => {
+    // A count without the caveat reads as reassurance, and the caveat is the part
+    // a reader acts on. Each document carries it in the idiom that suits it —
+    // the README and changelog say no model is immune, SECURITY.md says the
+    // defences do not make injection impossible and that a review can be
+    // suppressed — so all three phrasings count as the caveat being present.
+    const CAVEAT = /no model.{0,40}immune|not immune|does not make injection impossible|can suppress findings/i;
+    for (const [name, text] of surfaces) {
+      if (countsFor(text).length === 0) continue;
+      expect(flat(text), `${name} states a count but never states the limitation`)
+        .toMatch(CAVEAT);
+    }
   });
 });
 

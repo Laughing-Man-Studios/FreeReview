@@ -71,6 +71,27 @@ for (const m of changelog.matchAll(COMPARE)) {
   }
 }
 
+// A version section with no compare link is legitimate — it is a draft whose tag
+// does not exist yet, which is the state main is in between drafting notes and
+// cutting the release. Requiring the link unconditionally made it impossible to
+// have a drafted changelog section on green main, so the rule is inverted: a
+// section is only a problem when a tag for it DOES exist and the link is absent,
+// which means the changelog has fallen behind the repository.
+//
+// This is also why a new version's link and the `[Unreleased]` bump belong after
+// the tag is cut, not before it.
+const sections = [...changelog.matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map((m) => m[1]);
+for (const version of sections) {
+  if (new RegExp(`^\\[${version.replace(/[.-]/g, "\\$&")}\\]:`, "m").test(changelog)) continue;
+  const tagged = [...tags].some((t) => t === version || t === `v${version}`);
+  if (tagged) {
+    problems.push(
+      `${version} has a tag on the remote but no compare link here — the changelog has ` +
+        "fallen behind the repository",
+    );
+  }
+}
+
 if (problems.length > 0) {
   for (const p of problems) console.error(`  ${p}`);
   fail(

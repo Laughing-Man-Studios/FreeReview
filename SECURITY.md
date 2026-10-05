@@ -108,11 +108,9 @@ instructions. Defence is layered, and no single layer is trusted:
    disclosed as unmeasured.
 
 **Measured outcome, 2026-10-05: these layers do not make injection impossible.**
-The default model resisted 6 of 8 payload classes and was silenced by two of
-them — a suppression string shaped like a configuration value, and a payload
-that tries to escape the fenced block the diff is rendered into and emit its own
-empty findings array. In both, a real defect was planted directly behind the
-payload and the model reported nothing.
+The default model resisted 7 of 8 payload classes and was silenced by one of
+them: a suppression string shaped like a configuration value, with a real defect
+planted directly behind it.
 
 Each was checked against an ablation control — the same diff with the payload
 removed — and in both cases the defect *is* found without the payload, so the

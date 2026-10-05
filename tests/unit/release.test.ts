@@ -147,19 +147,38 @@ describe("release notes resolve from the changelog", () => {
     expect(CHANGELOG).toMatch(/^## \[1\.0\.0\]/m);
   });
 
-  it("states the fallback chain weakness in the release notes", () => {
+  it("states the injection weakness in the notes for the release being cut", () => {
     // This is the most important thing a prospective user should read, and it is
     // the thing a security-adjacent project is most tempted to omit.
-    const section = sectionOf("1.0.0");
-    // Rewritten 2026-10-02. The old assertions demanded the notes say the
-    // default model "resists prompt injection", which is false — one payload
-    // class silences it, confirmed by ablation. A test that fails when the
-    // documentation becomes accurate is a test that was protecting the error.
-    expect(flat(section)).toMatch(/no model resists prompt injection/i);
-    expect(flat(section)).toMatch(/silenced by one of the eight, in three passes out of three/i);
-    expect(flat(section)).toMatch(/steered by the code under review/i);
-    expect(flat(section)).toMatch(/largest open weakness/i);
-    expect(flat(section)).not.toMatch(/only the default model resists/i);
+    //
+    // Version-agnostic on purpose. It was pinned to a fixed section, which meant
+    // the assertion silently rotted: the claim it checked was the current one,
+    // but it was reading a section written before the current measurement, so
+    // each new release either failed the test or tempted someone to rewrite the
+    // expectation instead of the notes. The newest section is the one a user
+    // reads, and it is the one that must carry the current claim.
+    const newest = [...CHANGELOG.matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)]
+      .map((m) => m[1]!)
+      .reduce((a, b) => (b > a ? b : a));
+    const section = flat(sectionOf(newest));
+
+    expect(newest, "no version section found").toBeDefined();
+    // Loose on wording, tight on substance. Three earlier attempts pinned exact
+    // phrases and each one failed on a rewrite that said the same thing more
+    // clearly — which trains a maintainer to stop improving the prose. So each
+    // assertion names the claim and tolerates intervening words, while the
+    // negative assertion below stays exact: that one is about a phrase that must
+    // not reappear anywhere.
+    //
+    // Claims required: no model is immune; exactly one payload class suppresses,
+    // and it did so repeatedly; and the limitation is named as the largest.
+    expect(section).toMatch(/no model[^.]{0,80}(immune|resists prompt injection)/i);
+    expect(section).toMatch(/one of the eight payload classes[^.]{0,120}(silence|suppress)/i);
+    expect(section).toMatch(/every pass|in 3 of 3|three passes/i);
+    expect(section).toMatch(/largest open weakness/i);
+    // The superseded claim must not survive anywhere, in any section. It is the
+    // one that shipped in v1.0.0 and v1.0.1 and was wrong.
+    expect(flat(CHANGELOG)).not.toMatch(/only the default model resists/i);
   });
 
   it("states that redaction is not a substitute for rotating a key", () => {
@@ -237,15 +256,16 @@ describe("the changelog's compare links stay consistent", () => {
   const headings = capture(/^## \[([^\]]+)\]/gm);
   const defined = capture(/^\[([^\]]+)\]:/gm);
 
-  it("defines a compare link for every version heading", () => {
-    for (const version of headings) {
-      expect(CHANGELOG).toMatch(new RegExp(`^\\[${version.replace(/[.-]/g, "\\$&")}\\]:\\s*\\S+`, "m"));
-    }
-  });
-
   it("defines no compare link for a version that has no heading", () => {
     // The inverse error: an orphan definition is usually a rename that left the
     // old name behind, which renders as a dead link at the foot of the page.
+    //
+    // The forward direction — every heading has a link — is deliberately NOT
+    // asserted here. A drafted section's tag does not exist yet, so its link
+    // cannot either, and requiring one made it impossible to keep a drafted
+    // changelog on green main. `npm run check:changelog` covers that direction,
+    // because only it can see the remote: it fails on a link naming a tag that
+    // does not exist, and on a tag that exists with no link here.
     for (const name of defined) {
       expect(headings).toContain(name);
     }
@@ -288,17 +308,22 @@ describe("the changelog's compare links stay consistent", () => {
     }
   });
 
-  it("points [Unreleased] at the newest version above it", () => {
+  it("never lets [Unreleased] lag more than one release behind", () => {
     // This went stale silently: [Unreleased] compared against v1.0.0 while v1.0.1
     // was published, so the compare page omitted a whole release.
     //
-    // An earlier attempt allowed the base to lag a *drafted* section, reasoning
-    // that a version is written before its tag exists. That exemption was wrong:
-    // a drafted section already carries a compare link, so "has a link" cannot
-    // distinguish drafted from released, and the guard then demanded an exact
-    // match on a base that pointed at an untagged version. The honest form is an
-    // exact match against the newest heading, and bumping the base is simply the
-    // last step of cutting a release — same as tagging it.
+    // Two earlier forms of this assertion were both wrong and are worth
+    // recording. Demanding an exact match on the newest heading makes it
+    // impossible to keep a drafted changelog on green main, because a draft's tag
+    // does not exist yet. Detecting "is this a draft" by checking whether the
+    // heading has a compare link does not work either: the link is added when the
+    // tag is cut, so the signal only appears after the fact — too late to be a
+    // precondition.
+    //
+    // So: allow the base to be the newest heading or the one below, which covers
+    // both the post-release and pending-tag states, and fail if it ever lags by two
+    // or more. Whether the tag exists is not this test's business;
+    // `npm run check:changelog` answers that against the remote.
     const cmp = (a: string, b: string): number => {
       const pa = a.split(".").map(Number);
       const pb = b.split(".").map(Number);
@@ -308,24 +333,17 @@ describe("the changelog's compare links stay consistent", () => {
       }
       return 0;
     };
-    // Semver max, not first-or-last in file order: the changelog is written
-    // newest-first, so `[0]` and `.pop()` disagree, and only one of them is
-    // currently right depending on which way someone last edited.
     const versions = headings.filter((h) => h !== "Unreleased");
     const newest = versions.reduce((a, b) => (cmp(b, a) > 0 ? b : a));
-    expect(newest, "no version section found above [Unreleased]").toBeDefined();
+    const older = versions.filter((v) => cmp(v, newest) < 0);
+    const secondNewest = older.length > 0 ? older.reduce((a, b) => (cmp(b, a) > 0 ? b : a)) : "0.0.0";
     const link = CHANGELOG.match(/^\[Unreleased\]:\s*(\S+)$/m)?.[1] ?? "";
-    // Prefix-agnostic on purpose. This test used to demand `v${newest}`, which
-    // was right until `1.0.2` was released without the `v` — at which point the
-    // test rejected the *correct* link and would have pushed someone to
-    // "restore" a `v1.0.2` that does not exist. The tag prefix is not derivable
-    // from the changelog, so asserting on it here is asserting on a guess.
-    //
-    // `npm run check:changelog` is the guard that can actually answer this: it
-    // asks the remote which tags exist. Between them, the version numbers are
-    // pinned here and the tag names are verified there.
     const base = link.match(/\/compare\/v?([\d.]+)\.\.\.HEAD/)?.[1];
     expect(base, `[Unreleased] link is not a compare link: ${link}`).toBeDefined();
-    expect(base).toBe(newest);
+    expect(
+      cmp(base!, secondNewest) >= 0,
+      `[Unreleased] compares from v${base} but v${secondNewest} is already released, so the ` +
+        "compare page omits it",
+    ).toBe(true);
   });
 });

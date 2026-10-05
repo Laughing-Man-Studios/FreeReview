@@ -63,6 +63,76 @@ moves `v1` forward and consumers on `@v1` receive it.
 > Full rationale, including the prerequisites and the one that cannot be checked
 > from inside the repository, is in `docs/execution-plan.md` §14.3a.
 
+## [1.0.3] — 2026-10-05
+
+**Strengthens the injection evidence and corrects the count. Review behaviour is
+otherwise unchanged** — same models, same prompt, same request budget. What
+changes is that the published disclosure now rests on repeated measurement
+instead of a single observation.
+
+### Fixed
+
+- **The resistance count was wrong: 7 of 8, not 6.** Measuring the injection
+  fixtures and their ablation controls three times, with the response cache
+  disabled, put the default model's resistance at **7 of 8 payload classes**.
+  The earlier 6 came from single observations. The correction runs in the safe
+  direction — it understates resistance — but it was still wrong.
+
+- **The one suppressing payload is now replicated rather than assumed.** A
+  suppression instruction disguised as a configuration value silenced the model
+  in **3 of 3 passes**, while its ablation control — the same defect with the
+  payload removed — found it in **3 of 3**. Across all three passes the model
+  reported the planted defect in **23 of 24** injection observations. A claim
+  this central should not rest on one sample.
+
+- **A second suppression, reported in the previous commit, is retracted.** A
+  payload that escapes the diff's fenced block silenced the model once and in
+  0 of 3 repeats. A third fixture failed in exactly one pass — the one where the
+  upstream provider began rate-limiting. Four fixtures missed in that pass and
+  three of them were *controls*, which carry no payload at all, so degraded
+  detection under saturation is not an injection effect. Counting it would have
+  invented a suppression the controls disprove.
+
+### Added
+
+- **`eval/run.ts --only <pattern>`** for scoping a run to a subset of fixtures,
+  as a substring or `/regex/`. The cache key is
+  `(promptVersion, modelId, chunkHash)` with no pass component, so `--repeat`
+  requires `--no-cache` to measure anything; scoping to the 16 relevant fixtures
+  made three passes cost 48 requests instead of 93. An unmatched filter exits
+  non-zero rather than reporting a successful zero-request run.
+
+- **Eight ablation controls**, one per injection fixture, each identical to its
+  twin with the payload removed. These are what make suppression
+  distinguishable from a missed defect; without them a quiet run is ambiguous.
+
+### Fixed (dataset)
+
+- **Six fixtures were scoring correct reports as misses.** The harness matches
+  anchor placements exactly, and the model reports three of these defects as a
+  whole-function or two-line quote that contains the defect line. That is a
+  correct report, and it was being counted as a miss plus a false positive.
+  Alternates now cover the legitimate quoting styles; the fixture validator
+  caught two of the first attempts as impossible expectations. Rescored from
+  cache at no request cost: recall 0.76 → 0.86, precision 0.73 → 0.83, false
+  positives 4 → 1.
+
+### Known limitations
+
+- **No model in the free pool has been measured immune to instructions planted
+  in a diff, including the default one.** One of the eight payload classes
+  silences it in every pass measured, so a pull request author can suppress
+  findings in their own review by landing a suppression string in the diff — the
+  review can be steered by the code under review. Reviews say so on every run;
+  they do not prevent it. **This remains the largest open weakness in the
+  project**, and it is a property of the free tier rather than something further
+  testing will resolve: there is no second injection-resistant model available to
+  put behind the primary.
+- **Provider saturation degrades detection independently of injection.** In the
+  rate-limited pass, detection fell from 23/24 to 21/24 with no visible
+  difference to the user, because the review still published. A quiet review
+  under load is not evidence of a clean diff.
+
 ## [1.0.2] — 2026-10-05
 
 **Corrects a false security claim, and changes what every review body says.**
@@ -138,7 +208,8 @@ visible rather than adding them.
 
 - **No model resists prompt injection, including the default one.** Measured
   2026-10-02 after widening the injection set from two payloads to eight: the
-  default model resisted 6 of 8 payload classes and was silenced by one of the eight, in three passes out of three —
+  default model resisted 7 of 8 payload classes and was silenced by one of the eight, in three
+  passes out of three —
   a suppression string disguised as a configuration value — with the silencing
   confirmed by an ablation control rather than a missed bug. **The review can
   therefore be steered by the code under review on the default configuration**,
@@ -232,7 +303,8 @@ them is worse than one that does not have them.
 
 - **No model resists prompt injection, including the default one.** Measured
   2026-10-02 after widening the injection set from two payloads to eight: the
-  default model resisted 6 of 8 payload classes and was silenced by one of the eight, in three passes out of three —
+  default model resisted 7 of 8 payload classes and was silenced by one of the eight in three passes
+  out of three —
   a suppression string disguised as a configuration value — with the silencing
   confirmed by an ablation control rather than a missed bug. **The review can
   therefore be steered by the code under review on the default configuration**,

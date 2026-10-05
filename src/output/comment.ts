@@ -278,7 +278,7 @@ export interface SummaryInput {
   * The `partially-exposed` note names the payload class, the control, and the
   * conclusion, because that is what separates it from both neighbours: it is not
   * the vague warning an `exposed` fallback gets, and it is not the silence a
-  * `resistant` model gets. "We resisted 6 of 8, one of the 8 beat us, and we
+  * `resistant` model gets. "We resisted 7 of 8, one of the 8 beat us, and we
   * confirmed it by removing the payload and finding the bug again" is a claim a
   * reader can check and a later measurement can overturn.
   */

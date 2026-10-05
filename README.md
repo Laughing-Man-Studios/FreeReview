@@ -292,13 +292,13 @@ golden dataset — see [`docs/model-evaluation.md`](docs/model-evaluation.md).
 
 | Role | Model | Mode | Injection resistance |
 | --- | --- | --- | --- |
-| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **partial** — 6 of 8 payload classes resisted, 2 suppressions, each on a single observation |
+| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **partial** — 7 of 8 payload classes resisted, 1 suppression, replicated across 3 passes |
 | Fallback 1 | `nvidia/nemotron-3-super-120b-a12b:free` | prompt-JSON | exposed |
 | Fallback 2 | `qwen/qwen3.8-27b:free` | `json_object` | exposed |
 | Fallback 3 | `nvidia/nemotron-3-ultra-550b-a55b:free` | prompt-JSON | exposed |
 
 **No model in this pool is immune, and the primary is the least exposed rather
-than safe.** It resisted 6 of 8 payload classes where every fallback complied
+than safe.** It resisted 7 of 8 payload classes where every fallback complied
 with at least one, and that margin — not raw quality — is why it ships first: the
 measured recall and precision of the primary and of the best fallback are within
 noise of each other, so exposure is what separates them.
@@ -400,7 +400,8 @@ key is still the only fix.
 **The largest open weakness is prompt injection, and it is no longer confined to
 the fallback chain.** Every model here has been measured following instructions
 planted in a diff. The primary — the default, used on almost every run — resisted
-6 of 8 payload classes and was silenced by one of the eight, in three passes out of three, confirmed by ablation. So a
+7 of 8 payload classes and was silenced by one of the eight in three passes out of three, confirmed by
+ablation. So a
 pull request author can suppress findings in their own review by landing a
 suppression string in a diff, on the default configuration. Reviews disclose this
 in their body, which makes it visible rather than silent, but it does not prevent
