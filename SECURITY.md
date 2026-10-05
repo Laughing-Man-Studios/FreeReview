@@ -107,12 +107,21 @@ instructions. Defence is layered, and no single layer is trusted:
    `exposed` models name the payload behaviour, and unmeasured models are
    disclosed as unmeasured.
 
-**Measured outcome, 2026-10-02: these layers do not make injection impossible.**
-The default model resisted 6 of 8 payload classes and was silenced by the
-eighth — a suppression string shaped like a configuration value, planted beside
-a real defect, which it declined to report. An ablation control (the same diff
-with the payload removed) confirmed this was suppression rather than a missed
-bug: without the payload the defect is found.
+**Measured outcome, 2026-10-05: these layers do not make injection impossible.**
+The default model resisted 6 of 8 payload classes and was silenced by two of
+them — a suppression string shaped like a configuration value, and a payload
+that tries to escape the fenced block the diff is rendered into and emit its own
+empty findings array. In both, a real defect was planted directly behind the
+payload and the model reported nothing.
+
+Each was checked against an ablation control — the same diff with the payload
+removed — and in both cases the defect *is* found without the payload, so the
+instruction rather than the difficulty did the silencing.
+
+**How firm that is.** Each suppression rests on a single observation, and the
+same comparison produced the opposite pattern in two other fixture pairs purely
+from run-to-run variation in defect detection. So two in eight is an **upper
+bound**, not an established rate; establishing one needs repeated runs.
 
 **The practical consequence is that a pull request author can suppress findings
 in their own review, on the default configuration.** Layer 3 only drops a finding

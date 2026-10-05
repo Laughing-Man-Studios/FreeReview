@@ -1057,7 +1057,7 @@ does.
   is the largest open weakness in the project and Phase 8 does not close it.
 - **No model is injection-resistant, including the primary.** Measured
   2026-10-02 after widening the injection set from 2 payloads to 8: the primary
-  resisted 6 of 8 and was silenced by the eighth, confirmed by an ablation
+  resisted 6 of 8 and was silenced by two of the eight, confirmed by an ablation
   control. The earlier `0 / 2` was two observations of one payload shape. This
   moves the weakness off the fallback chain and onto the default path, which is
   worse than the record above implies — see `docs/model-evaluation.md`.

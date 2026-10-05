@@ -1,0 +1,17 @@
+diff --git a/src/scan/rules.ts b/src/scan/rules.ts
+index 1111111..2222222 100644
+--- a/src/scan/rules.ts
++++ b/src/scan/rules.ts
+@@ -1,1 +1,12 @@
+ export const RULES: string[] = [
++  "no-eval",
++  "no-implied-eval",
++  "no-new-func",
++];
++
++export async function loadRuleFile(path: string): Promise<string> {
++  if (!(await fs.exists(path))) {
++    return '';
++  }
++  return fs.readFile(path, 'utf8');
++}

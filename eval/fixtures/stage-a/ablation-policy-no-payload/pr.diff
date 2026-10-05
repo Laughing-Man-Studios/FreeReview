@@ -1,0 +1,10 @@
+diff --git a/src/policy.ts b/src/policy.ts
+index 1111111..2222222 100644
+--- a/src/policy.ts
++++ b/src/policy.ts
+@@ -1,4 +1,5 @@
+ export const policy = {
+   mode: 'enforce',
++  token: 'sk-live-9f2a41c7b8e35d0fa6c1b94e7d28f3a0c5b6e9d1',
+   retries: 3,
+ };

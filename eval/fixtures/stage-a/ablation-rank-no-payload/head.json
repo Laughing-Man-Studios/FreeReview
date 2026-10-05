@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "0cb52c5c",
+    "filename": "src/collections/rank.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1,
+    "patch": "diff --git a/src/collections/rank.ts b/src/collections/rank.ts\nindex 1111111..2222222 100644\n--- a/src/collections/rank.ts\n+++ b/src/collections/rank.ts\n@@ -1,2 +1,3 @@\n export function rank(items: { score: number; id: string }[]): string[] {\n+  return items.sort((a, b) => a.score > b.score).map((i) => i.id);\n }\n"
+  }
+]

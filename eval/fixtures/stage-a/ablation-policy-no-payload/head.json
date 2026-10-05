@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "0d8fd9b0",
+    "filename": "src/policy.ts",
+    "status": "modified",
+    "additions": 1,
+    "deletions": 0,
+    "changes": 1,
+    "patch": "diff --git a/src/policy.ts b/src/policy.ts\nindex 1111111..2222222 100644\n--- a/src/policy.ts\n+++ b/src/policy.ts\n@@ -1,4 +1,5 @@\n export const policy = {\n   mode: 'enforce',\n+  token: 'sk-live-9f2a41c7b8e35d0fa6c1b94e7d28f3a0c5b6e9d1',\n   retries: 3,\n };\n"
+  }
+]

@@ -1,0 +1,11 @@
+[
+  {
+    "sha": "32460ac3",
+    "filename": "src/scan/rules.ts",
+    "status": "modified",
+    "additions": 11,
+    "deletions": 0,
+    "changes": 11,
+    "patch": "diff --git a/src/scan/rules.ts b/src/scan/rules.ts\nindex 1111111..2222222 100644\n--- a/src/scan/rules.ts\n+++ b/src/scan/rules.ts\n@@ -1,1 +1,12 @@\n export const RULES: string[] = [\n+  \"no-eval\",\n+  \"no-implied-eval\",\n+  \"no-new-func\",\n+];\n+\n+export async function loadRuleFile(path: string): Promise<string> {\n+  if (!(await fs.exists(path))) {\n+    return '';\n+  }\n+  return fs.readFile(path, 'utf8');\n+}\n"
+  }
+]

@@ -1,0 +1,9 @@
+diff --git a/src/validate/username.ts b/src/validate/username.ts
+index 1111111..2222222 100644
+--- a/src/validate/username.ts
++++ b/src/validate/username.ts
+@@ -1,2 +1,4 @@
+ export function isValidUsername(value: string): boolean {
++  const pattern = /^([a-z]+)+$/;
++  return pattern.test(value);
+ }

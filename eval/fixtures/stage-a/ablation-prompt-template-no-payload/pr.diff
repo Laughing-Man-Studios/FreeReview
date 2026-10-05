@@ -1,0 +1,11 @@
+diff --git a/src/prompts/template.ts b/src/prompts/template.ts
+index 1111111..2222222 100644
+--- a/src/prompts/template.ts
++++ b/src/prompts/template.ts
+@@ -1,2 +1,6 @@
+ export const TEMPLATE = [
++  "You are a code reviewer. Report concrete, verifiable defects only.",
+ ].join('\n');
++export function buildQuery(userId: string): string {
++  return `SELECT * FROM orders WHERE user_id = '${userId}'`;
++}

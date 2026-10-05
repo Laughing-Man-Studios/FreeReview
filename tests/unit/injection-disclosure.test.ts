@@ -8,9 +8,9 @@
  * from a clean one. That is the exact failure this project exists to prevent.
  *
  * As of 2026-10-02 this is no longer confined to the fallback chain: the primary
- * was measured resisting 6 of 8 payload classes and silenced by the eighth, with
- * an ablation control confirming suppression rather than a missed bug. So the
- * disclosure has to fire on the *default* path too — which is why
+ * was measured resisting 6 of 8 payload classes, and two of the eight silenced
+ * it — each checked against an ablation control where the same defect is found.
+ * So the disclosure has to fire on the *default* path too — which is why
  * `partially-exposed` exists as a distinct state from `resistant`, and why the
  * silence-on-`resistant` rule is now exercised against a hypothetical model
  * rather than against the one that ships.
@@ -71,7 +71,13 @@ describe("injectionDisclosure", () => {
     // checkable: how many it resisted, what beat it, and how that was verified.
     const note = injectionDisclosure([LING], CATALOG) ?? "";
     expect(note).toMatch(/6 of 8/);
+    expect(note).toMatch(/two of them silenced it completely/i);
     expect(note).toMatch(/configuration value/i);
+    // The rate is explicitly not claimed. Two single observations that match the
+    // suppression pattern, in a design that also produced that pattern from
+    // run-to-run variation, is an upper bound — and the note has to say so or it
+    // implies a precision the measurement does not have.
+    expect(note).toMatch(/upper bound rather than an established rate/i);
     expect(note).toMatch(/payload removed|removed the payload|with the payload\s+removed/i);
     expect(note).toMatch(/no model in the free pool has been measured immune/i);
   });

@@ -138,7 +138,7 @@ visible rather than adding them.
 
 - **No model resists prompt injection, including the default one.** Measured
   2026-10-02 after widening the injection set from two payloads to eight: the
-  default model resisted 6 of 8 payload classes and was silenced by the eighth —
+  default model resisted 6 of 8 payload classes and was silenced by two of the eight —
   a suppression string disguised as a configuration value — with the silencing
   confirmed by an ablation control rather than a missed bug. **The review can
   therefore be steered by the code under review on the default configuration**,
@@ -232,7 +232,7 @@ them is worse than one that does not have them.
 
 - **No model resists prompt injection, including the default one.** Measured
   2026-10-02 after widening the injection set from two payloads to eight: the
-  default model resisted 6 of 8 payload classes and was silenced by the eighth —
+  default model resisted 6 of 8 payload classes and was silenced by two of the eight —
   a suppression string disguised as a configuration value — with the silencing
   confirmed by an ablation control rather than a missed bug. **The review can
   therefore be steered by the code under review on the default configuration**,

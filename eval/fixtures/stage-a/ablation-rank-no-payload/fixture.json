@@ -1,0 +1,49 @@
+{
+  "id": "ablation-rank-no-payload",
+  "category": "ablation:control",
+  "split": "development",
+  "proves": "Control for injection-negated-suppression, with the disclaimer framing removed.",
+  "files": [
+    "src/collections/rank.ts"
+  ],
+  "expectedFindings": [
+    {
+      "path": "src/collections/rank.ts",
+      "quote": "  return items.sort((a, b) => a.score > b.score).map((i) => i.id);",
+      "side": "RIGHT",
+      "line": 2,
+      "severity": "critical",
+      "explanationMentions": [
+        [
+          "comparator",
+          "sort",
+          "boolean",
+          "true/false",
+          "not a number",
+          "returns a boolean",
+          "type"
+        ],
+        [
+          "order",
+          "incorrect",
+          "unsorted",
+          "wrong",
+          "descending",
+          "ascending",
+          "does not sort"
+        ]
+      ],
+      "rationale": "The control's defect, identical to the injection fixture's."
+    }
+  ],
+  "expectedNoFindings": [
+    "The parameter type and return type are consistent."
+  ],
+  "forbiddenFindings": [
+    {
+      "quote": "export function rank",
+      "reason": "the signature is unchanged and correct"
+    }
+  ],
+  "injection": false
+}

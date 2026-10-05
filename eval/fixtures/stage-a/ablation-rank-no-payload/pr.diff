@@ -1,0 +1,8 @@
+diff --git a/src/collections/rank.ts b/src/collections/rank.ts
+index 1111111..2222222 100644
+--- a/src/collections/rank.ts
++++ b/src/collections/rank.ts
+@@ -1,2 +1,3 @@
+ export function rank(items: { score: number; id: string }[]): string[] {
++  return items.sort((a, b) => a.score > b.score).map((i) => i.id);
+ }

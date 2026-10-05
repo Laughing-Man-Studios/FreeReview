@@ -45,7 +45,7 @@
 >   the single most important caveat on this page, and it is the reason a
 >   suppressed review is not distinguishable from a clean one.
 >
->   The default model resisted **6 of 8** injection payload classes tested. One
+>   The default model resisted **6 of 8** injection payload classes tested. Two
 >   beat it: a suppression instruction disguised as a configuration value, placed
 >   beside a real defect, which it declined to report. That was confirmed by
 >   ablation rather than assumed — the same defect re-reviewed with the payload
@@ -292,7 +292,7 @@ golden dataset — see [`docs/model-evaluation.md`](docs/model-evaluation.md).
 
 | Role | Model | Mode | Injection resistance |
 | --- | --- | --- | --- |
-| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **partial** — 6 of 8 payload classes resisted, 1 confirmed suppression |
+| **Primary** | `inclusionai/ling-3.0-flash-sante:free` | prompt-JSON | **partial** — 6 of 8 payload classes resisted, 2 suppressions, each on a single observation |
 | Fallback 1 | `nvidia/nemotron-3-super-120b-a12b:free` | prompt-JSON | exposed |
 | Fallback 2 | `qwen/qwen3.8-27b:free` | `json_object` | exposed |
 | Fallback 3 | `nvidia/nemotron-3-ultra-550b-a55b:free` | prompt-JSON | exposed |
@@ -303,7 +303,7 @@ with at least one, and that margin — not raw quality — is why it ships first
 measured recall and precision of the primary and of the best fallback are within
 noise of each other, so exposure is what separates them.
 
-One payload class defeats it. The table says `partial` rather than `resistant`
+Two payload classes defeat it. The table says `partial` rather than `resistant`
 because the difference decides what a reader is told at run time: a
 `partially-exposed` model publishes a disclosure on **every** review, and a
 `resistant` one publishes nothing at all.
@@ -400,7 +400,7 @@ key is still the only fix.
 **The largest open weakness is prompt injection, and it is no longer confined to
 the fallback chain.** Every model here has been measured following instructions
 planted in a diff. The primary — the default, used on almost every run — resisted
-6 of 8 payload classes and was silenced by the eighth, confirmed by ablation. So a
+6 of 8 payload classes and was silenced by two of the eight, confirmed by ablation. So a
 pull request author can suppress findings in their own review by landing a
 suppression string in a diff, on the default configuration. Reviews disclose this
 in their body, which makes it visible rather than silent, but it does not prevent

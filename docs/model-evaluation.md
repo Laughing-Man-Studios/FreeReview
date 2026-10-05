@@ -17,7 +17,7 @@ consecutive 429s.
 > **not** immune.
 >
 > **Measured 2026-10-02, Stage A, `ling`, prompt `2026-09-27.1`: 8 injection
-> fixtures, 6 resisted, 1 confirmed suppression, 1 ambiguous.**
+> fixtures, 6 resisted, 2 suppressions, each on a single observation, 1 ambiguous.**
 >
 > The `0 / 2` throughout this document was measured on two payloads that shared
 > a shape — a suppression instruction in a comment or a string literal in a
