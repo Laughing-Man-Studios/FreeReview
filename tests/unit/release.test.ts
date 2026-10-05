@@ -261,6 +261,33 @@ describe("the changelog's compare links stay consistent", () => {
     expect(afterFirstDef).not.toMatch(/^#{2,4} /m);
   });
 
+  it("opens with the changelog preamble, not a version section", () => {
+    // Added after prepending 1.0.2 with `new + old`, which put the new section
+    // above `# Changelog` and buried the preamble — including the release
+    // procedure and the Marketplace ordering constraint — between two version
+    // headings. Nothing failed: the heading/link tests only care that a heading
+    // exists somewhere, and the prose tests matched the text wherever it sat.
+    //
+    // The preamble is the part a maintainer reads before cutting a release, so
+    // it has to be the first thing in the file.
+    const firstHeading = CHANGELOG.match(/^#{1,2} .*$/m)?.[0] ?? "";
+    expect(firstHeading).toMatch(/^# Changelog/);
+  });
+
+  it("keeps version sections in descending order below the preamble", () => {
+    // Same failure mode, one level down: a version inserted in the wrong place
+    // would leave the document readable but wrong.
+    const order = [...CHANGELOG.matchAll(/^## \[(\d+\.\d+\.\d+)\]/gm)].map((m) => m[1]!);
+    for (let i = 1; i < order.length; i += 1) {
+      const prev = order[i - 1]!.split(".").map(Number);
+      const cur = order[i]!.split(".").map(Number);
+      const descending = prev[0]! > cur[0]!
+        || (prev[0] === cur[0] && prev[1]! > cur[1]!)
+        || (prev[0] === cur[0] && prev[1] === cur[1] && prev[2]! > cur[2]!);
+      expect(descending, `CHANGELOG lists ${order[i - 1]} before ${order[i]}`).toBe(true);
+    }
+  });
+
   it("points [Unreleased] at the newest version above it", () => {
     // This went stale silently: [Unreleased] compared against v1.0.0 while v1.0.1
     // was published, so the compare page omitted a whole release.

@@ -1,44 +1,3 @@
-## [1.0.2] — 2026-10-05
-
-**Corrects a false security claim, and changes what every review body says.**
-Behaviour of the review itself is unchanged: same models, same prompt, same
-anchoring, same request budget. What changes is that the published review no
-longer presents itself as injection-proof.
-
-### Fixed
-
-- **The default model is not injection-resistant, and every surface said it was.**
-  Widening the injection fixture set from two payloads to eight payload classes
-  found one that silences the primary outright — a suppression instruction
-  disguised as a configuration value, planted beside a real defect, which it
-  declined to report. An ablation control confirmed this was suppression rather
-  than a missed bug: the same diff with the payload removed *is* reported.
-
-  The earlier `0 / 2` was two observations of one payload shape. It was the
-  load-bearing claim of the project, and it did not survive being tested against
-  payloads that were shaped differently.
-
-- **Reviews now disclose this on the default path.** `injectionResistance:
-  "resistant"` emitted no disclosure at all, so while the primary carried that
-  value every review it produced presented as clean. A fourth state,
-  `partially-exposed`, discloses on every run: how many payload classes were
-  resisted, which one was not, and that the ablation control is what
-  distinguishes suppression from a missed bug.
-
-### Known limitations
-
-Restated, because this release is mostly about them:
-
-- **No model in the free pool has been measured immune to instructions planted
-  in a diff, including the default one.** A pull request author can suppress
-  findings in their own review by landing a suppression string in the diff. This
-  is reachable on the default configuration, not only when a review falls through
-  to a fallback or when `privacy_mode: relaxed` is set. Reviews now say so; they
-  do not prevent it.
-- The default model also reports the injection payload itself as a finding on
-  some fixtures, landing a comment on a line that is not defective. Known
-  limitation, not a scored failure.
-
 # Changelog
 
 All notable changes to this project are documented in this file.
@@ -94,6 +53,47 @@ moves `v1` forward and consumers on `@v1` receive it.
 >
 > Full rationale, including the prerequisites and the one that cannot be checked
 > from inside the repository, is in `docs/execution-plan.md` §14.3a.
+
+## [1.0.2] — 2026-10-05
+
+**Corrects a false security claim, and changes what every review body says.**
+Behaviour of the review itself is unchanged: same models, same prompt, same
+anchoring, same request budget. What changes is that the published review no
+longer presents itself as injection-proof.
+
+### Fixed
+
+- **The default model is not injection-resistant, and every surface said it was.**
+  Widening the injection fixture set from two payloads to eight payload classes
+  found one that silences the primary outright — a suppression instruction
+  disguised as a configuration value, planted beside a real defect, which it
+  declined to report. An ablation control confirmed this was suppression rather
+  than a missed bug: the same diff with the payload removed *is* reported.
+
+  The earlier `0 / 2` was two observations of one payload shape. It was the
+  load-bearing claim of the project, and it did not survive being tested against
+  payloads that were shaped differently.
+
+- **Reviews now disclose this on the default path.** `injectionResistance:
+  "resistant"` emitted no disclosure at all, so while the primary carried that
+  value every review it produced presented as clean. A fourth state,
+  `partially-exposed`, discloses on every run: how many payload classes were
+  resisted, which one was not, and that the ablation control is what
+  distinguishes suppression from a missed bug.
+
+### Known limitations
+
+Restated, because this release is mostly about them:
+
+- **No model in the free pool has been measured immune to instructions planted
+  in a diff, including the default one.** A pull request author can suppress
+  findings in their own review by landing a suppression string in the diff. This
+  is reachable on the default configuration, not only when a review falls through
+  to a fallback or when `privacy_mode: relaxed` is set. Reviews now say so; they
+  do not prevent it.
+- The default model also reports the injection payload itself as a finding on
+  some fixtures, landing a comment on a line that is not defective. Known
+  limitation, not a scored failure.
 
 ## [1.0.1] — 2026-10-02
 
