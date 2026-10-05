@@ -85,6 +85,15 @@ jobs:
       - name: action.yml validity
         run: npm run check:action
 
+      # A changelog compare link that points at a non-existent tag renders as a
+      # dead link on the release page and in the repository view. The unit test
+      # cannot catch it: whether `1.0.2` or `v1.0.2` is correct is not derivable
+      # from the file's own contents, so this asks the remote instead. `1.0.2`
+      # was released without the `v` prefix and is immutable, so this is not
+      # hypothetical.
+      - name: changelog compare links
+        run: npm run check:changelog
+
       # The golden dataset is a set of claims about ground truth. A wrong claim
       # is worse than a missing fixture: it would make the evaluation
       # confidently report the reviewer as wrong when the author was. This runs

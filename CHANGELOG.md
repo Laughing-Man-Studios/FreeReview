@@ -35,6 +35,15 @@ branch would leave the documented install broken while the release looked
 successful. Subversion bumps work by re-pointing the branch: cutting `v1.4.0`
 moves `v1` forward and consumers on `@v1` receive it.
 
+> **Tag naming, and one exception.** Releases are tagged `v1.0.0`, `v1.0.1`, and
+> then **`1.0.2`** — created by hand without the `v` prefix, and immutable, so it
+> cannot be corrected. Two consequences: compare links for `1.0.2` are written
+> against the real tag (`.../v1.0.1...1.0.2`), and the next release must be
+> `v1.0.3`, so the sequence is `v1.0.1`, `1.0.2`, `v1.0.3`. Nothing breaks —
+> `uses: …@v1` resolves through the branch, not a tag — but a tag-prefix
+> assumption in tooling or a compare link will silently point at nothing.
+> `npm run check:changelog` verifies every compare link against real tags.
+>
 > **Marketplace.** Publishing to the GitHub Marketplace is a **manual** step that
 > the Release workflow cannot perform — the "Publish this Action to the GitHub
 > Marketplace" flag lives on the release object and has no API equivalent. So a
@@ -357,7 +366,7 @@ because it was written as a running log and is worth more than a summary.
 
 Nothing yet. Add a `## [x.y.z]` section above this one when cutting a release.
 
-[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.2...HEAD
-[1.0.2]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.1...v1.0.2
+[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/1.0.2...HEAD
+[1.0.2]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.1...1.0.2
 [1.0.1]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v0.1.0...v1.0.0

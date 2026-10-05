@@ -315,7 +315,17 @@ describe("the changelog's compare links stay consistent", () => {
     const newest = versions.reduce((a, b) => (cmp(b, a) > 0 ? b : a));
     expect(newest, "no version section found above [Unreleased]").toBeDefined();
     const link = CHANGELOG.match(/^\[Unreleased\]:\s*(\S+)$/m)?.[1] ?? "";
-    // Heading is `[1.0.2]`, tag is `v1.0.2` — the `v` prefix is not optional.
-    expect(link).toContain(`/compare/v${newest}...HEAD`);
+    // Prefix-agnostic on purpose. This test used to demand `v${newest}`, which
+    // was right until `1.0.2` was released without the `v` — at which point the
+    // test rejected the *correct* link and would have pushed someone to
+    // "restore" a `v1.0.2` that does not exist. The tag prefix is not derivable
+    // from the changelog, so asserting on it here is asserting on a guess.
+    //
+    // `npm run check:changelog` is the guard that can actually answer this: it
+    // asks the remote which tags exist. Between them, the version numbers are
+    // pinned here and the tag names are verified there.
+    const base = link.match(/\/compare\/v?([\d.]+)\.\.\.HEAD/)?.[1];
+    expect(base, `[Unreleased] link is not a compare link: ${link}`).toBeDefined();
+    expect(base).toBe(newest);
   });
 });
