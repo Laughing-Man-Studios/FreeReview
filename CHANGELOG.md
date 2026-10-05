@@ -1,4 +1,4 @@
-## [1.0.2] — 2026-10-02
+## [1.0.2] — 2026-10-05
 
 **Corrects a false security claim, and changes what every review body says.**
 Behaviour of the review itself is unchanged: same models, same prompt, same
