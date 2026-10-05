@@ -438,7 +438,8 @@ because it was written as a running log and is worth more than a summary.
 
 Nothing yet. Add a `## [x.y.z]` section above this one when cutting a release.
 
-[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/1.0.2...HEAD
+[Unreleased]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.3...HEAD
+[1.0.3]: https://github.com/Laughing-Man-Studios/FreeReview/compare/1.0.2...v1.0.3
 [1.0.2]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.1...1.0.2
 [1.0.1]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/Laughing-Man-Studios/FreeReview/compare/v0.1.0...v1.0.0
